@@ -1,0 +1,16 @@
+# 平台内部数据（勿发布）
+.workbuddy/
+
+# 原始素材源（27MB CC0 原包，发布版资产已在 mcd3d/models/ 中）
+asset-src/
+
+# 开发过程截图与临时编辑目录
+outputs/
+outputs-before.png
+scene-edit/
+
+# 杂项
+*.log
+node_modules/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html data-page-node-id="OJ0ohMyA1WB6VY9yZnxHzB" lang="zh-CN">
+  <head data-page-node-id="Ai0UkdjcJyBel7fSnSYHSg">
+<script data-page-node-id="cv6p8beMxKGDlUW8Wo1yl4" src="/page/page_comm/inject.js"></script>
+    <meta data-page-node-id="ahZY1hXJuBQC5Ny7fMf30n" charset="UTF-8">
+    <link data-page-node-id="qxRwxENDcdIg2Fip9Mu6pz" href="./favicon.svg" rel="icon" type="image/svg+xml">
+    <meta data-page-node-id="hgXPmtjDJilZRh7l3zLDPz" content="width=device-width, initial-scale=1.0" name="viewport">
+    <link data-page-node-id="SQCI6jR7G8tTGscQEGMQQq" href="https://fonts.googleapis.com" rel="preconnect">
+    <link data-page-node-id="WKjVh8do1B7kb9p16cpscO" crossorigin href="https://fonts.gstatic.com" rel="preconnect">
+    <link data-page-node-id="rtDRnuZg6VAAQybLSFQN3R" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@900&display=swap" rel="stylesheet">
+    <title data-page-node-id="oj6snykGeV3m9S2YuOv3gJ" data-pnid-children="kJFPtt1vwFi75zHi0EKozO">AI 红发魔女的工作台</title>
+    <script data-page-node-id="gXrelupMKuzwoRqwEURsrT" data-pnid-children="m61srE7nr1IfZ2zVg1LXtH">
+/* Cozy World data-loader (inlined) */
+/* Cozy World 数据驱动加载器
+ * 从资料库数据表拉取：房间定义 / 角色×房间内容 / 创作资产 / 用户存档
+ * 无宿主 SDK 或拉取失败时返回空对象，bundle 侧用内置样本兜底。
+ * 存档：角色与工作台状态写回资料库 saves 表，跨设备同步；localStorage 作为本地兜底。
+ */
+(function () {
+  // 数据表映射（databaseId 一律硬编码字面量）：房间定义 Oh7OgKolSuXfrmwFQluA2b / 角色内容 HPw4xDd2T4FbZC73QkcJHW / 创作资产 zoODySnDbUDskaAu0G47AF / 用户存档 RLUmgjoal2esSILvhBA9a7
+  var USER_KEY = "default";           // 存档用户标识（多用户扩展预留）
+  var CH_KEY = "cozy-world:character";
+  var WS_KEY = "cozy-world:workspace";
+  var CP_KEY = "cozy-world-content-progress";
+
+  function dbApi() {
+    var sp = window.__SMART_PAGE__;
+    if (sp && sp.database) return sp.database;
+    if (window.dbApi) { try { return window.dbApi(); } catch (e) {} }
+    return null;
+  }
+  // 平台托管环境（资料库域名）才等待宿主 SDK 注入；本地/无宿主环境立即走兜底
+  function isHosted() {
+    if (window.__SMART_PAGE__) return true;
+    var h = (window.location && window.location.host) || "";
+    return /workbuddy|codebuddy/i.test(h);
+  }
+  function waitDb(attempt) {
+    return new Promise(function (res, rej) {
+      var db = dbApi();
+      if (db && db.query) return res(db);
+      if (!isHosted()) return rej(new Error("not-hosted"));
+      if (attempt >= 40) return rej(new Error("db-not-ready"));
+      setTimeout(function () { waitDb(attempt + 1).then(res, rej); }, 150);
+    });
+  }
+  function qRooms(db) {
+    return db.query({ databaseId: "Oh7OgKolSuXfrmwFQluA2b", pageSize: 100 }).then(function (r) {
+      return (r && r.results) || [];
+    });
+  }
+  function qContents(db) {
+    return db.query({ databaseId: "HPw4xDd2T4FbZC73QkcJHW", pageSize: 100 }).then(function (r) {
+      return (r && r.results) || [];
+    });
+  }
+  function qAssets(db) {
+    return db.query({ databaseId: "zoODySnDbUDskaAu0G47AF", pageSize: 100 }).then(function (r) {
+      return (r && r.results) || [];
+    });
+  }
+  function qSaves(db) {
+    return db.query({ databaseId: "RLUmgjoal2esSILvhBA9a7", pageSize: 100 }).then(function (r) {
+      return (r && r.results) || [];
+    });
+  }
+  function str(v) {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    if (Array.isArray(v)) return v.map(str).join(",");
+    if (typeof v === "object") {
+      if (v.text != null) return str(v.text);
+      if (v.select != null) return str(v.select);
+      if (v.multi_select != null) return str(v.multi_select);
+      if (v.url != null) return str(v.url);
+      if (v.date != null) return str(v.date);
+      var keys = Object.keys(v);
+      for (var i = 0; i < keys.length; i++) {
+        var s = str(v[keys[i]]);
+        if (s) return s;
+      }
+    }
+    return "";
+  }
+  function splitLines(s) {
+    return s ? s.split(/\n+/).map(function (x) { return x.trim(); }).filter(Boolean) : [];
+  }
+  function parseHighlights(s) {
+    return s ? s.split(/\n+/).map(function (line) {
+      var i = line.indexOf("=");
+      if (i > 0) return { label: line.slice(0, i).trim(), value: line.slice(i + 1).trim() };
+      return { label: line.trim(), value: "" };
+    }).filter(function (h) { return h.label; }) : [];
+  }
+
+  // 创作资产 → skills 房间动态内容（分类统计 + 最新条目）
+  function mergeAssets(rooms, assetsRec) {
+    if (!rooms || !assetsRec || !assetsRec.length) return rooms;
+    var catCount = {}, names = [];
+    assetsRec.forEach(function (a) {
+      var cat = str(a["分类"]) || "素材";
+      var nm = str(a["名称"]);
+      catCount[cat] = (catCount[cat] || 0) + 1;
+      if (nm) names.push(nm);
+    });
+    var cats = Object.keys(catCount);
+    var latest = names.slice(-4).reverse();
+    return rooms.map(function (room) {
+      if (!room || room.id !== "skills" || !cats.length) return room;
+      return {
+        id: "skills",
+        title: "创作资产库",
+        eyebrow: "资产库 · 素材索引",
+        metric: cats.length + " 类",
+        summary: "分类收藏",
+        accent: room.accent || "#9a72b7",
+        paragraphs: ["封面模板、配乐、字体、素材按分类整理。条目在资料库资产表中维护，这里展示分类概览与最新收藏。"],
+        bullets: latest.map(function (n) { return "最新 · " + n; }),
+        highlights: cats.map(function (c) { return { label: c, value: catCount[c] + " 条" }; })
+      };
+    });
+  }
+
+  function applySave(save) {
+    try {
+      // “角色”保存 3D 形象；“职业预设”保存 creator/maker/designer/student/life，二者不再互相覆盖。
+      var character = str(save["角色"]);
+      var preset = str(save["职业预设"]) || "creator";
+      var roleText = str(save["角色文本"]);
+      var name = str(save["昵称"]);
+      var roomState = str(save["房间状态"]);
+      var progress = str(save["内容进度"]);
+      if (character && !localStorage.getItem(CH_KEY)) localStorage.setItem(CH_KEY, character);
+      if ((roleText || name || roomState || preset) && !localStorage.getItem(WS_KEY)) {
+        var ws = { ready: true, name: name || "", role: preset, roleText: roleText || "", zones: null };
+        if (roomState) { try { var z = JSON.parse(roomState); if (Array.isArray(z)) ws.zones = z; } catch (e) {} }
+        localStorage.setItem(WS_KEY, JSON.stringify(ws));
+      }
+      if (progress) {
+        try {
+          var cp = JSON.parse(progress);
+          var old = JSON.parse(localStorage.getItem(CP_KEY) || "{}");
+          localStorage.setItem(CP_KEY, JSON.stringify(Object.assign({}, cp, old)));
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
+  function build() {
+    return waitDb(0).then(function (db) {
+      return Promise.all([qRooms(db), qContents(db), qAssets(db), qSaves(db)]);
+    }).then(function (rs) {
+      var roomsRec = rs[0], contentsRec = rs[1], assetsRec = rs[2], savesRec = rs[3];
+      var rooms = null, contents = null;
+      if (roomsRec.length) {
+        rooms = roomsRec.map(function (r) {
+          return {
+            id: str(r["房间id"]),
+            title: str(r["标题"]),
+            eyebrow: str(r["眉题"]),
+            metric: str(r["指标"]),
+            summary: str(r["摘要"]),
+            accent: str(r["强调色"]) || "#9a72b7",
+            paragraphs: splitLines(str(r["段落"])),
+            highlights: parseHighlights(str(r["要点"])),
+            bullets: splitLines(str(r["子弹点"]))
+          };
+        }).filter(function (r) { return r.id; });
+        rooms = mergeAssets(rooms, assetsRec);
+      }
+      if (contentsRec.length) {
+        contents = {};
+        contentsRec.forEach(function (r) {
+          var role = str(r["角色"]), room = str(r["房间"]);
+          if (!role || !room) return;
+          contents[role] = contents[role] || {};
+          contents[role][room] = {
+            mood: str(r["心情"]),
+            metric: str(r["指标"]),
+            summary: str(r["摘要"]),
+            paragraphs: splitLines(str(r["段落"])),
+            highlights: parseHighlights(str(r["要点"])),
+            bullets: splitLines(str(r["子弹点"]))
+          };
+        });
+      }
+      if (savesRec && savesRec.length) applySave(savesRec[0]);
+      return { rooms: rooms, contents: contents };
+    }).catch(function () {
+      return {};
+    });
+  }
+
+  var bootPromise = null;
+  function boot() {
+    if (!bootPromise) bootPromise = build();
+    return bootPromise;
+  }
+  window.__COZY_BOOT__ = boot;
+
+  // ---------- 存档写入（跨设备同步，失败静默降级 localStorage） ----------
+  function upsertSave(properties) {
+    var db = dbApi();
+    if (!db || !db.query) return;
+    db.query({ databaseId: "RLUmgjoal2esSILvhBA9a7", pageSize: 100 }).then(function (r) {
+      var rows = (r && r.results) || [];
+      var mine = null;
+      for (var i = 0; i < rows.length; i++) {
+        if (str(rows[i]["用户标识"]) === USER_KEY) { mine = rows[i]; break; }
+      }
+      if (mine && mine._id) {
+        db.updateRecord({ databaseId: "RLUmgjoal2esSILvhBA9a7", recordId: mine._id, properties: properties }).catch(function () {});
+      } else {
+        db.addRecord({ databaseId: "RLUmgjoal2esSILvhBA9a7", properties: properties }).catch(function () {});
+      }
+    }).catch(function () {});
+  }
+  function saveCharacter(roleId) {
+    try {
+      upsertSave({ "用户标识": { text: USER_KEY }, "角色": { text: roleId || "" } });
+    } catch (e) {}
+  }
+  function saveWorkspace(ws) {
+    try {
+      if (!ws) return;
+      upsertSave({
+        "用户标识": { text: USER_KEY },
+        "职业预设": { select: ws.role || "creator" },
+        "角色文本": { text: ws.roleText || "" },
+        "昵称": { text: ws.name || "" },
+        "房间状态": { text: Array.isArray(ws.zones) ? JSON.stringify(ws.zones) : "" }
+      });
+    } catch (e) {}
+  }
+  window.__COZY_SAVE__ = { character: saveCharacter, workspace: saveWorkspace };
+})();
+
+</script>
+    <script data-page-node-id="92Mr59ktPjLymmsGkBbn72" crossorigin src="./assets/index-CaMtmYif.js" type="module"></script>
+    <link data-page-node-id="OFKyNqmVQLIWp38zCPyhBc" crossorigin href="./assets/index-RwYoW78L.css" rel="stylesheet">
+  </head>
+  <body data-page-node-id="5rFRdCkR8BTl69g7fMn8FK">
+    <div data-page-node-id="qaQ9V549X0O2dBVHZFYGTD" id="root"></div>
+  
+<script data-page-node-id="AqgvBvWvibmeJpR39f6T4e" data-pnid-children="KVBhzpipgpRAnAWidBbg09">
+/* Witch Specialized Room Tables (inlined) */
+/* AI 红发魔女的工作台 · 一屋一表管理层
+ * 仅在用户进入对应 3D 小屋的原生 article.dialog 后出现。
+ * 每间小屋读取自己的资料库表；创作资产库继续使用“创作资产”表。
+ */
+(function () {
+  if (window.__WITCH_ROOM_TABLES__) return;
+  window.__WITCH_ROOM_TABLES__ = true;
+
+  var MODELS = {
+    daily: {
+      db: "xCRSbq0ioYPKUPkedcHzbx", place: "卧室", title: "今日计划", verb: "记下今日计划", primary: "事项",
+      empty: "今天还没有计划，记下第一条吧", meta: ["计划时间", "优先级", "状态"],
+      fields: [
+        { name: "事项", label: "事项", kind: "text", required: true, placeholder: "今天最重要的一件事" },
+        { name: "计划时间", label: "计划时间", kind: "date" },
+        { name: "优先级", label: "优先级", kind: "select", options: ["高", "中", "低"] },
+        { name: "状态", label: "状态", kind: "select", options: ["未开始", "进行中", "已完成"] },
+        { name: "备注", label: "备注", kind: "textarea", placeholder: "补充说明（可选）" }
+      ]
+    },
+    ideas: {
+      db: "PaNgxzQ4i7ZfuMt8xZidCB", place: "客厅", title: "灵感池", verb: "放入客厅", primary: "灵感",
+      empty: "客厅还空着，放点想法进来", meta: ["来源", "分类", "热度", "状态", "记录日期"],
+      fields: [
+        { name: "灵感", label: "灵感", kind: "text", required: true, placeholder: "这次想到什么？" },
+        { name: "来源", label: "来源", kind: "text", placeholder: "播客、朋友、路上看到的…" },
+        { name: "分类", label: "分类", kind: "select", options: ["选题", "观察", "问题", "收藏"] },
+        { name: "热度", label: "热度（1–5）", kind: "number", placeholder: "1" },
+        { name: "状态", label: "状态", kind: "select", options: ["待整理", "已采用", "暂存"] },
+        { name: "记录日期", label: "记录日期", kind: "date" }
+      ]
+    },
+    content: {
+      db: "55B13lfiQAZCPKqydFseRI", place: "办公室", title: "内容项目", verb: "新建内容", primary: "内容标题",
+      empty: "还没有内容项目，新建一条吧", meta: ["发布平台", "阶段", "截止日期"],
+      fields: [
+        { name: "内容标题", label: "内容标题", kind: "text", required: true, placeholder: "这条内容叫什么？" },
+        { name: "发布平台", label: "发布平台", kind: "select", options: ["小红书", "视频号", "公众号", "其他"] },
+        { name: "阶段", label: "阶段", kind: "select", options: ["选题", "脚本", "制作", "待发布", "已发布"] },
+        { name: "截止日期", label: "截止日期", kind: "date" },
+        { name: "发布链接", label: "发布链接", kind: "url", placeholder: "https://…" },
+        { name: "备注", label: "备注", kind: "textarea", placeholder: "补充说明（可选）" }
+      ]
+    },
+    fitness: {
+      db: "0Jumy5eOut2RXaBzGvSqUG", place: "花园", title: "训练记录", verb: "排入训练", primary: "训练项目",
+      empty: "花园还没排训练", meta: ["类型", "计划日期", "时长（分钟）", "完成"],
+      fields: [
+        { name: "训练项目", label: "训练项目", kind: "text", required: true, placeholder: "深蹲、跑步、瑜伽…" },
+        { name: "类型", label: "类型", kind: "select", options: ["力量", "有氧", "拉伸", "恢复"] },
+        { name: "计划日期", label: "计划日期", kind: "date" },
+        { name: "时长（分钟）", label: "时长（分钟）", kind: "number", placeholder: "45" },
+        { name: "完成", label: "完成训练", kind: "checkbox" },
+        { name: "备注", label: "备注", kind: "textarea", placeholder: "感受、动作要点（可选）" }
+      ]
+    },
+    analytics: {
+      db: "QbnjS6oXmWWKBQ1dEZGIBv", place: "厨房", title: "复盘实验", verb: "记一笔", primary: "复盘主题",
+      empty: "还没有复盘记录，记一笔吧", meta: ["周期", "关键指标", "已行动"],
+      fields: [
+        { name: "复盘主题", label: "复盘主题", kind: "text", required: true, placeholder: "这次想复盘什么？" },
+        { name: "周期", label: "周期", kind: "select", options: ["日", "周", "月", "项目"] },
+        { name: "关键指标", label: "关键指标", kind: "textarea", placeholder: "关键数据或观察" },
+        { name: "结论", label: "结论", kind: "textarea", placeholder: "学到了什么？" },
+        { name: "下次实验", label: "下次实验", kind: "textarea", placeholder: "下一步只改变什么？" },
+        { name: "已行动", label: "已行动", kind: "checkbox" }
+      ]
+    },
+    travel: {
+      db: "pTppDbZoLnDYaiZXoybffW", place: "旅行码头", title: "旅行计划", verb: "点亮一站", primary: "目的地",
+      empty: "地图上还没有点亮的地方", meta: ["状态", "出发日期", "预算（元）"],
+      fields: [
+        { name: "目的地", label: "目的地", kind: "text", required: true, placeholder: "想去哪里？" },
+        { name: "状态", label: "状态", kind: "select", options: ["想去", "计划中", "已出发", "已到访"] },
+        { name: "出发日期", label: "出发日期", kind: "date" },
+        { name: "预算（元）", label: "预算（元）", kind: "number", placeholder: "0" },
+        { name: "行程清单", label: "行程清单", kind: "textarea", placeholder: "想做的事、想吃的、想看的…" }
+      ]
+    },
+    skills: {
+      db: "zoODySnDbUDskaAu0G47AF", place: "创作资产库", title: "创作资产", verb: "收藏素材", primary: "名称",
+      empty: "资产库还空着，收藏一些素材吧", meta: ["分类", "标签"],
+      fields: [
+        { name: "名称", label: "资产名称", kind: "text", required: true, placeholder: "素材或模板的名称" },
+        { name: "分类", label: "分类", kind: "select", options: ["封面模板", "配乐", "字体", "素材"] },
+        { name: "描述", label: "描述", kind: "textarea", placeholder: "它适合做什么？" },
+        { name: "链接", label: "链接", kind: "url", placeholder: "https://…" },
+        { name: "标签", label: "标签", kind: "text", placeholder: "视频、竖版、免版权…" },
+        { name: "更新时间", label: "更新时间", kind: "date" }
+      ]
+    }
+  };
+
+  var ROLE_PROFILES = {
+    creator:  { label: "雾岛讲述者", focus: "叙事与内容节奏", className: "creator" },
+    maker:    { label: "灯塔修补匠", focus: "项目推进与问题复盘", className: "maker" },
+    designer: { label: "星图绘制师", focus: "视觉探索与素材灵感", className: "designer" },
+    student:  { label: "海风学徒", focus: "学习路线与知识积累", className: "student" },
+    life:     { label: "慢岛旅人", focus: "生活节奏与远方清单", className: "life" }
+  };
+  var state = { records: {}, loading: {}, offline: false, editing: {}, activeRole: "" };
+  var CACHE_KEY = "witch-room-tables-v2";
+  var ROLE_KEY = "cozy-world:workspace";
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function dbApi() {
+    var sp = window.__SMART_PAGE__;
+    if (sp && sp.database) return sp.database;
+    if (window.dbApi) { try { return window.dbApi(); } catch (e) {} }
+    return null;
+  }
+  function escapeHtml(value) {
+    return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function dateOnly(value) {
+    return value ? String(value).slice(0, 10) : "";
+  }
+  function raw(value) {
+    if (value == null) return "";
+    if (typeof value === "string" || typeof value === "number") return value;
+    if (typeof value === "boolean") return value;
+    if (Array.isArray(value)) {
+      if (!value.length) return "";
+      if (typeof value[0] === "object") return value[0].link || value[0].text || "";
+      return value.join(", ");
+    }
+    if (typeof value === "object") {
+      if (value.link != null) return value.link || value.text || "";
+      if (value.text != null) return value.text;
+      if (value.select != null) return value.select;
+      if (value.date != null) return value.date;
+      var keys = Object.keys(value);
+      for (var i = 0; i < keys.length; i++) { var out = raw(value[keys[i]]); if (out !== "") return out; }
+    }
+    return "";
+  }
+  function getId(row) { return row._id || row.record_id || row.id || ""; }
+  function saveCache() {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ records: state.records })); } catch (e) {}
+  }
+  function loadCache() {
+    try { var c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); if (c && c.records) state.records = c.records; } catch (e) {}
+  }
+  function toast(message, isError) {
+    var node = document.getElementById("wrt-toast");
+    if (!node) return;
+    node.textContent = message;
+    node.className = "wrt-toast show" + (isError ? " error" : "");
+    clearTimeout(node._timer);
+    node._timer = setTimeout(function () { node.className = "wrt-toast"; }, 2500);
+  }
+  function normalizedRole(role, roleText) {
+    if (ROLE_PROFILES[role]) return role;
+    // 旧版把 3D 形象 id 写入了 workspace.role；迁移时回到默认职业，避免误判为生活预设。
+    if (/^(witch|cat|dog|alpaca|doll|boy)$/.test(String(role || ""))) return "creator";
+    var text = String(roleText || "").toLowerCase();
+    if (/设计|摄影|插画|美术|艺术|建筑|手作|造型|剪辑/.test(text)) return "designer";
+    if (/写|编辑|博主|主播|自媒体|运营|内容|文案|播客|视频|作者/.test(text)) return "creator";
+    if (/学生|研究|博士|硕士|老师|教师|讲师|备考|读研|学术/.test(text)) return "student";
+    if (/开发|工程|产品|修复|代码|构建|版本/.test(text)) return "maker";
+    return "life";
+  }
+  function currentRole() {
+    try {
+      var ws = JSON.parse(localStorage.getItem(ROLE_KEY) || "{}");
+      return normalizedRole(ws.role || "creator", ws.roleText || "");
+    } catch (e) { return "creator"; }
+  }
+  function roleProfile() { return ROLE_PROFILES[currentRole()] || ROLE_PROFILES.creator; }
+  function roleNotice(count) {
+    var profile = roleProfile();
+    return '<span class="wrt-role-pill wrt-role-' + profile.className + '">当前职业 · ' + escapeHtml(profile.label) + '</span><small>' + escapeHtml(profile.focus) + ' · ' + (count || 0) + ' 项</small>';
+  }
+  function roomForDialog(dialog) {
+    var kicker = $(".dialog-kicker", dialog);
+    var heading = $("h2", dialog);
+    var text = ((kicker && kicker.textContent) || "") + " " + ((heading && heading.textContent) || "");
+    if (/卧室|每日计划/.test(text)) return "daily";
+    if (/客厅|选题灵感/.test(text)) return "ideas";
+    if (/办公室|内容进度/.test(text)) return "content";
+    if (/花园|健身计划/.test(text)) return "fitness";
+    if (/厨房|数据复盘/.test(text)) return "analytics";
+    if (/旅行码头|环游世界/.test(text)) return "travel";
+    if (/资产库|创作资产/.test(text)) return "skills";
+    return "";
+  }
+
+  function parseRow(model, source) {
+    var out = { id: getId(source), localOnly: false, "职业预设": raw(source["职业预设"]) || "creator" };
+    model.fields.forEach(function (field) {
+      var value = source[field.name];
+      if (field.kind === "checkbox") out[field.name] = value === true || value === "true" || value === 1;
+      else if (field.kind === "date") out[field.name] = dateOnly(raw(value));
+      else out[field.name] = raw(value);
+    });
+    return out;
+  }
+  // databaseId 硬编码字面量分发（一屋一表）：卧室·今日计划 / 客厅·灵感池 / 办公室·内容项目 / 花园·训练记录 / 厨房·复盘实验 / 旅行码头·旅行计划 / 创作资产库·创作资产
+  function queryRoom(db, room) {
+    switch (room) {
+      case "daily": return db.query({ databaseId: "xCRSbq0ioYPKUPkedcHzbx", pageSize: 100 });
+      case "ideas": return db.query({ databaseId: "PaNgxzQ4i7ZfuMt8xZidCB", pageSize: 100 });
+      case "content": return db.query({ databaseId: "55B13lfiQAZCPKqydFseRI", pageSize: 100 });
+      case "fitness": return db.query({ databaseId: "0Jumy5eOut2RXaBzGvSqUG", pageSize: 100 });
+      case "analytics": return db.query({ databaseId: "QbnjS6oXmWWKBQ1dEZGIBv", pageSize: 100 });
+      case "travel": return db.query({ databaseId: "pTppDbZoLnDYaiZXoybffW", pageSize: 100 });
+      case "skills": return db.query({ databaseId: "zoODySnDbUDskaAu0G47AF", pageSize: 100 });
+    }
+    return Promise.reject(new Error("unknown-room"));
+  }
+  function addRoomRecord(db, room, properties) {
+    switch (room) {
+      case "daily": return db.addRecord({ databaseId: "xCRSbq0ioYPKUPkedcHzbx", properties: properties });
+      case "ideas": return db.addRecord({ databaseId: "PaNgxzQ4i7ZfuMt8xZidCB", properties: properties });
+      case "content": return db.addRecord({ databaseId: "55B13lfiQAZCPKqydFseRI", properties: properties });
+      case "fitness": return db.addRecord({ databaseId: "0Jumy5eOut2RXaBzGvSqUG", properties: properties });
+      case "analytics": return db.addRecord({ databaseId: "QbnjS6oXmWWKBQ1dEZGIBv", properties: properties });
+      case "travel": return db.addRecord({ databaseId: "pTppDbZoLnDYaiZXoybffW", properties: properties });
+      case "skills": return db.addRecord({ databaseId: "zoODySnDbUDskaAu0G47AF", properties: properties });
+    }
+    return Promise.reject(new Error("unknown-room"));
+  }
+  function updateRoomRecord(db, room, recordId, properties) {
+    switch (room) {
+      case "daily": return db.updateRecord({ databaseId: "xCRSbq0ioYPKUPkedcHzbx", recordId: recordId, properties: properties });
+      case "ideas": return db.updateRecord({ databaseId: "PaNgxzQ4i7ZfuMt8xZidCB", recordId: recordId, properties: properties });
+      case "content": return db.updateRecord({ databaseId: "55B13lfiQAZCPKqydFseRI", recordId: recordId, properties: properties });
+      case "fitness": return db.updateRecord({ databaseId: "0Jumy5eOut2RXaBzGvSqUG", recordId: recordId, properties: properties });
+      case "analytics": return db.updateRecord({ databaseId: "QbnjS6oXmWWKBQ1dEZGIBv", recordId: recordId, properties: properties });
+      case "travel": return db.updateRecord({ databaseId: "pTppDbZoLnDYaiZXoybffW", recordId: recordId, properties: properties });
+      case "skills": return db.updateRecord({ databaseId: "zoODySnDbUDskaAu0G47AF", recordId: recordId, properties: properties });
+    }
+    return Promise.reject(new Error("unknown-room"));
+  }
+  function deleteRoomRecord(db, room, recordId) {
+    switch (room) {
+      case "daily": return db.deleteRecord({ databaseId: "xCRSbq0ioYPKUPkedcHzbx", recordId: recordId });
+      case "ideas": return db.deleteRecord({ databaseId: "PaNgxzQ4i7ZfuMt8xZidCB", recordId: recordId });
+      case "content": return db.deleteRecord({ databaseId: "55B13lfiQAZCPKqydFseRI", recordId: recordId });
+      case "fitness": return db.deleteRecord({ databaseId: "0Jumy5eOut2RXaBzGvSqUG", recordId: recordId });
+      case "analytics": return db.deleteRecord({ databaseId: "QbnjS6oXmWWKBQ1dEZGIBv", recordId: recordId });
+      case "travel": return db.deleteRecord({ databaseId: "pTppDbZoLnDYaiZXoybffW", recordId: recordId });
+      case "skills": return db.deleteRecord({ databaseId: "zoODySnDbUDskaAu0G47AF", recordId: recordId });
+    }
+    return Promise.reject(new Error("unknown-room"));
+  }
+  function loadRecords(room) {
+    var model = MODELS[room];
+    var requestedRole = currentRole();
+    if (!model || state.loading[room]) return;
+    state.loading[room] = true;
+    var db = dbApi();
+    if (!db || !db.query) { state.offline = true; state.loading[room] = false; renderAll(room); return; }
+    queryRoom(db, room).then(function (r) {
+      // 资料库 SDK 当前不承诺 select filter 的统一语义，前端基于职业字段做可靠过滤。
+      if (requestedRole !== currentRole()) { state.loading[room] = false; return loadRecords(room); }
+      var incoming = ((r && r.results) || []).map(function (row) { return parseRow(model, row); }).filter(function (row) { return row["职业预设"] === requestedRole; });
+      var local = state.records[room] || [];
+      local.forEach(function (row) { if (row.localOnly && row["职业预设"] === requestedRole) incoming.push(row); });
+      state.records[room] = incoming;
+      state.offline = false; state.loading[room] = false; saveCache(); renderAll(room);
+    }).catch(function () {
+      state.offline = true; state.loading[room] = false; renderAll(room);
+    });
+  }
+
+  function valuesToProps(model, values, isUpdate) {
+    var props = { "职业预设": { select: values["职业预设"] || currentRole() } };
+    model.fields.forEach(function (field) {
+      var value = values[field.name];
+      if (field.kind === "checkbox") { props[field.name] = { checkbox: !!value }; return; }
+      if (field.kind === "number") {
+        if (value !== "" && value != null && !Number.isNaN(Number(value))) props[field.name] = { number: Number(value) };
+        return;
+      }
+      if (field.kind === "date") {
+        if (value) props[field.name] = { date: value };
+        return;
+      }
+      if (field.kind === "select") {
+        if (value) props[field.name] = { select: value };
+        return;
+      }
+      if (field.kind === "url") {
+        if (value || isUpdate) props[field.name] = { url: { text: value || "", link: value || "" } };
+        return;
+      }
+      if (value || isUpdate) props[field.name] = { text: value || "" };
+    });
+    return props;
+  }
+  function formFields(model, record, prefix) {
+    return model.fields.map(function (field) {
+      var value = record && record[field.name] != null ? record[field.name] : "";
+      var id = prefix + "-" + field.name;
+      var control = "";
+      if (field.kind === "select") {
+        control = '<select id="' + escapeHtml(id) + '" data-wrt-field="' + escapeHtml(field.name) + '">' +
+          '<option value="">请选择</option>' + field.options.map(function (opt) {
+            return '<option value="' + escapeHtml(opt) + '"' + (value === opt ? " selected" : "") + '>' + escapeHtml(opt) + '</option>';
+          }).join("") + '</select>';
+      } else if (field.kind === "textarea") {
+        control = '<textarea id="' + escapeHtml(id) + '" data-wrt-field="' + escapeHtml(field.name) + '" placeholder="' + escapeHtml(field.placeholder || "") + '">' + escapeHtml(value) + '</textarea>';
+      } else if (field.kind === "checkbox") {
+        control = '<label class="wrt-check-label"><input id="' + escapeHtml(id) + '" type="checkbox" data-wrt-field="' + escapeHtml(field.name) + '"' + (value ? " checked" : "") + '><span>' + escapeHtml(field.label) + '</span></label>';
+      } else {
+        control = '<input id="' + escapeHtml(id) + '" type="' + (field.kind === "url" ? "url" : field.kind === "number" ? "number" : field.kind === "date" ? "date" : "text") + '" data-wrt-field="' + escapeHtml(field.name) + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(field.placeholder || "") + '">';
+      }
+      return '<label class="wrt-field' + (field.kind === "checkbox" ? " check" : "") + '">' + (field.kind === "checkbox" ? "" : '<span>' + escapeHtml(field.label) + (field.required ? " *" : "") + '</span>') + control + '</label>';
+    }).join("");
+  }
+  function collectValues(root, model) {
+    var values = {};
+    model.fields.forEach(function (field) {
+      var node = root.querySelector('[data-wrt-field="' + CSS.escape(field.name) + '"]');
+      values[field.name] = field.kind === "checkbox" ? !!(node && node.checked) : (node ? node.value.trim() : "");
+    });
+    return values;
+  }
+  function requiredOk(model, values) {
+    for (var i = 0; i < model.fields.length; i++) {
+      var field = model.fields[i];
+      if (field.required && !values[field.name]) return field.label;
+    }
+    return "";
+  }
+
+  function addRecord(room, root) {
+    var model = MODELS[room];
+    var values = collectValues(root, model);
+    var missing = requiredOk(model, values);
+    if (missing) { toast("请填写「" + missing + "」", true); return; }
+    values["职业预设"] = currentRole();
+    var row = Object.assign({ id: "local_" + Date.now(), localOnly: true }, values);
+    state.records[room] = state.records[room] || [];
+    state.records[room].unshift(row); saveCache(); render(root);
+    var db = dbApi();
+    if (!db || !db.addRecord) { state.offline = true; toast("离线模式：已暂存到本地", true); return; }
+    addRoomRecord(db, room, valuesToProps(model, values, false)).then(function (r) {
+      row.id = (r && (r.id || (r.result && r.result.id))) || row.id;
+      row.localOnly = false; state.offline = false; saveCache(); render(root);
+    }).catch(function () { state.offline = true; toast("未能同步，已暂存到本地", true); });
+  }
+  function beginEdit(room, id, root) {
+    state.editing[room] = id; render(root);
+  }
+  function saveEdit(room, id, root) {
+    var model = MODELS[room];
+    var rows = state.records[room] || [];
+    var row = rows.filter(function (x) { return x.id === id; })[0];
+    if (!row) return;
+    var editor = root.querySelector(".wrt-editor");
+    var values = collectValues(editor, model);
+    values["职业预设"] = row["职业预设"] || currentRole();
+    var missing = requiredOk(model, values);
+    if (missing) { toast("请填写「" + missing + "」", true); return; }
+    Object.keys(values).forEach(function (key) { row[key] = values[key]; });
+    state.editing[room] = ""; saveCache(); render(root);
+    var db = dbApi();
+    if (!db || !db.updateRecord || row.localOnly) { row.localOnly = true; state.offline = true; return; }
+    updateRoomRecord(db, room, id, valuesToProps(model, values, true))
+      .catch(function () { row.localOnly = true; state.offline = true; saveCache(); toast("更新未同步，已暂存到本地", true); });
+  }
+  function removeRecord(room, id, root) {
+    var model = MODELS[room];
+    var rows = state.records[room] || [];
+    var idx = rows.map(function (x) { return x.id; }).indexOf(id);
+    if (idx < 0) return;
+    var old = rows[idx];
+    rows.splice(idx, 1); saveCache(); render(root);
+    var db = dbApi();
+    if (!db || !db.deleteRecord || old.localOnly) return;
+    deleteRoomRecord(db, room, id).catch(function () {
+      rows.splice(idx, 0, old); saveCache(); render(root); toast("删除未同步，条目已还原", true);
+    });
+  }
+
+  function metaFor(model, row) {
+    return model.meta.map(function (key) {
+      var value = row[key];
+      if (value === true) value = "已完成";
+      if (value === false || value === "") return "";
+      return '<span>' + escapeHtml(key + " · " + value) + '</span>';
+    }).filter(Boolean).join("");
+  }
+  function recordActions(row) {
+    return '<div class="wrt-card-actions"><button type="button" data-wrt-action="edit" data-wrt-id="' + escapeHtml(row.id) + '">编辑</button><button type="button" class="danger" data-wrt-action="delete" data-wrt-id="' + escapeHtml(row.id) + '">删除</button></div>';
+  }
+  function detail(value, fallback) {
+    return value ? escapeHtml(value) : (fallback || '—');
+  }
+  function dateText(value) {
+    return value ? String(value).slice(0, 10).replace(/-/g, '.') : '未设日期';
+  }
+  function heat(level) {
+    var n = Math.max(0, Math.min(5, Number(level) || 0));
+    return '<span class="wrt-heat" aria-label="热度 ' + n + '">' + [1,2,3,4,5].map(function (i) { return '<i class="' + (i <= n ? 'on' : '') + '"></i>'; }).join('') + '</span>';
+  }
+  function badge(value, type) {
+    return '<span class="wrt-badge ' + (type || '') + '">' + escapeHtml(value || '未设置') + '</span>';
+  }
+  function cardShell(room, row, inner, cls) {
+    return '<article class="wrt-card ' + (cls || '') + '" data-wrt-id="' + escapeHtml(row.id) + '">' + inner + recordActions(row) + '</article>';
+  }
+  function renderEditing(model, room, row) {
+    return '<article class="wrt-card wrt-card-editing"><div class="wrt-editor">' + formFields(model, row, "edit-" + row.id) + '</div>' +
+      '<div class="wrt-card-actions"><button type="button" class="primary" data-wrt-action="save" data-wrt-id="' + escapeHtml(row.id) + '">保存修改</button><button type="button" data-wrt-action="cancel">取消</button></div></article>';
+  }
+  function renderPlanCard(row) {
+    var done = row['状态'] === '已完成';
+    return cardShell('daily', row,
+      '<div class="wrt-plan-check ' + (done ? 'done' : '') + '">' + (done ? '✓' : '○') + '</div>' +
+      '<div class="wrt-card-body"><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="xCRSbq0ioYPKUPkedcHzbx">' + escapeHtml(row['事项']) + '</div><div class="wrt-card-sub">' + detail(row['备注'], '今天的一件小事') + '</div><div class="wrt-chip-row">' + badge(row['优先级'] || '中', 'priority') + badge(row['状态'] || '未开始', done ? 'success' : '') + '<span class="wrt-date">' + dateText(row['计划时间']) + '</span></div></div>',
+      'wrt-card-plan ' + (done ? 'is-done' : ''));
+  }
+  function renderIdeaCard(row) {
+    return cardShell('ideas', row,
+      '<div class="wrt-idea-icon">✦</div><div class="wrt-card-body"><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="PaNgxzQ4i7ZfuMt8xZidCB">' + escapeHtml(row['灵感']) + '</div><div class="wrt-card-sub">来自 ' + detail(row['来源'], '未知来源') + '</div><div class="wrt-chip-row">' + badge(row['分类'] || '选题', 'idea') + badge(row['状态'] || '待整理', '') + heat(row['热度']) + '</div></div>',
+      'wrt-card-idea');
+  }
+  function renderContentCard(row) {
+    return cardShell('content', row,
+      '<div class="wrt-content-stage">' + escapeHtml(row['阶段'] || '选题') + '</div><div class="wrt-card-body"><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="55B13lfiQAZCPKqydFseRI">' + escapeHtml(row['内容标题']) + '</div><div class="wrt-card-sub">截止 · ' + dateText(row['截止日期']) + (row['备注'] ? '　' + escapeHtml(row['备注']) : '') + '</div></div>',
+      'wrt-card-content');
+  }
+  function renderFitnessCard(row) {
+    var done = !!row['完成'];
+    return cardShell('fitness', row,
+      '<div class="wrt-fitness-ring ' + (done ? 'done' : '') + '">' + (done ? '✓' : '＋') + '</div><div class="wrt-card-body"><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="0Jumy5eOut2RXaBzGvSqUG">' + escapeHtml(row['训练项目']) + '</div><div class="wrt-card-sub">' + detail(row['备注'], '安排一次身体活动') + '</div><div class="wrt-chip-row">' + badge(row['类型'] || '恢复', 'fitness') + '<span class="wrt-date">' + dateText(row['计划日期']) + '</span><span class="wrt-minute">' + (row['时长（分钟）'] || 0) + ' 分钟</span></div></div>',
+      'wrt-card-fitness ' + (done ? 'is-done' : ''));
+  }
+  function renderAnalyticsCard(row) {
+    return cardShell('analytics', row,
+      '<div class="wrt-card-body"><div class="wrt-card-top">' + badge(row['周期'] || '周', 'analytics') + (row['已行动'] ? badge('已行动', 'success') : badge('待实验', '')) + '</div><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="QbnjS6oXmWWKBQ1dEZGIBv">' + escapeHtml(row['复盘主题']) + '</div><div class="wrt-analytics-grid"><div><span>关键指标</span><strong>' + detail(row['关键指标']) + '</strong></div><div><span>结论</span><strong>' + detail(row['结论']) + '</strong></div></div><div class="wrt-next">下一步 · ' + detail(row['下次实验']) + '</div></div>',
+      'wrt-card-analytics');
+  }
+  function renderTravelCard(row) {
+    var list = String(row['行程清单'] || '').split(/\n+/).filter(Boolean).slice(0, 3);
+    return cardShell('travel', row,
+      '<div class="wrt-travel-orb"></div><div class="wrt-card-body"><div class="wrt-card-top">' + badge(row['状态'] || '想去', 'travel') + '<span class="wrt-date">' + dateText(row['出发日期']) + '</span></div><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="pTppDbZoLnDYaiZXoybffW">' + escapeHtml(row['目的地']) + '</div><div class="wrt-travel-detail">预算 ' + (row['预算（元）'] || 0) + ' 元</div>' + (list.length ? '<div class="wrt-mini-list">' + list.map(function (x) { return '<span>· ' + escapeHtml(x) + '</span>'; }).join('') + '</div>' : '') + '</div>',
+      'wrt-card-travel');
+  }
+  function renderAssetCard(row) {
+    return cardShell('skills', row,
+      '<div class="wrt-asset-symbol">◆</div><div class="wrt-card-body"><div class="wrt-card-top">' + badge(row['分类'] || '素材', 'asset') + '</div><div class="wrt-card-title" data-sp-bindable="database" data-sp-database-id="zoODySnDbUDskaAu0G47AF">' + escapeHtml(row['名称']) + '</div><div class="wrt-card-sub">' + detail(row['描述'], '演示创作素材') + '</div><div class="wrt-tags">' + String(row['标签'] || '').split(/[，,]/).filter(Boolean).map(function (x) { return '<span>' + escapeHtml(x.trim()) + '</span>'; }).join('') + '</div></div>',
+      'wrt-card-asset');
+  }
+  function renderCard(model, room, row) {
+    if (state.editing[room] === row.id) return renderEditing(model, room, row);
+    if (room === 'daily') return renderPlanCard(row);
+    if (room === 'ideas') return renderIdeaCard(row);
+    if (room === 'content') return renderContentCard(row);
+    if (room === 'fitness') return renderFitnessCard(row);
+    if (room === 'analytics') return renderAnalyticsCard(row);
+    if (room === 'travel') return renderTravelCard(row);
+    return renderAssetCard(row);
+  }
+  function renderList(root, room) {
+    var model = MODELS[room];
+    var list = $(".wrt-list", root);
+    var rows = (state.records[room] || []).slice();
+    if (state.loading[room]) { list.innerHTML = '<p class="wrt-empty">正在读取' + escapeHtml(model.title) + '…</p>'; return; }
+    if (!rows.length) { list.innerHTML = '<p class="wrt-empty">' + escapeHtml(model.empty) + '</p>'; return; }
+    if (room === 'content') {
+      var platforms = ['小红书', '视频号', '公众号', '其他'];
+      list.innerHTML = platforms.map(function (platform) {
+        var group = rows.filter(function (row) { return (row['发布平台'] || '其他') === platform; });
+        var published = group.filter(function (row) { return row['阶段'] === '已发布'; }).length;
+        return '<section class="wrt-platform"><div class="wrt-platform-head"><strong>' + escapeHtml(platform) + '</strong><span data-sp-bindable="database" data-sp-database-id="55B13lfiQAZCPKqydFseRI">' + published + ' / ' + group.length + ' 已发布</span></div><div class="wrt-platform-progress"><i style="width:' + (group.length ? Math.round(published / group.length * 100) : 0) + '%"></i></div>' +
+          (group.length ? '<div class="wrt-card-stack">' + group.map(function (row) { return renderCard(model, room, row); }).join('') + '</div>' : '<p class="wrt-platform-empty">尚未添加内容项目</p>') +
+        '</section>';
+      }).join('');
+      return;
+    }
+    var cards = rows.map(function (row) { return renderCard(model, room, row); }).join('');
+    list.innerHTML = '<div class="wrt-card-grid wrt-grid-' + room + '">' + cards + '</div>';
+  }
+  function render(root) {
+    var room = root.getAttribute("data-wrt-room");
+    var model = MODELS[room];
+    var role = currentRole();
+    var profile = ROLE_PROFILES[role] || ROLE_PROFILES.creator;
+    var roleRows = state.records[room] || [];
+    root.setAttribute("data-wrt-role", role);
+    var roleNode = $(".wrt-role", root);
+    if (roleNode) roleNode.innerHTML = roleNotice(roleRows.length);
+    var stateNode = $(".wrt-state", root);
+    stateNode.textContent = state.offline ? "离线暂存" : state.loading[room] ? "读取中…" : "当前职业数据已同步";
+    stateNode.className = "wrt-state" + (state.offline ? " offline" : "");
+    renderList(root, room);
+  }
+  function renderAll(room) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-wrt-room="' + room + '"]'), render);
+  }
+  function refreshRoleIfChanged() {
+    var next = currentRole();
+    if (next === state.activeRole) return;
+    state.activeRole = next;
+    state.records = {}; state.loading = {}; state.editing = {};
+    try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+    Array.prototype.forEach.call(document.querySelectorAll("[data-wrt-room]"), function (root) {
+      render(root);
+      loadRecords(root.getAttribute("data-wrt-room"));
+    });
+  }
+
+  function mount(room, dialog) {
+    if (dialog.querySelector("[data-wrt-room]")) return;
+    // 这间小屋只保留原生标题区；原有硬编码卡片/进度列表隐藏，专属表成为唯一展示和交互来源。
+    dialog.classList.add("wrt-rebuilt");
+    var model = MODELS[room];
+    var root = document.createElement("section");
+    root.className = "wrt-room-table";
+    root.setAttribute("data-wrt-room", room);
+    root.innerHTML =
+      '<div class="wrt-summary"><div><span>专属数据表</span><strong>' + escapeHtml(model.place + " · " + model.title) + '</strong><div class="wrt-role"></div></div><button type="button" class="wrt-open">' + escapeHtml(model.verb) + '</button></div>' +
+      '<div class="wrt-workspace"><div class="wrt-list"></div><div class="wrt-create" hidden><div class="wrt-fields">' + formFields(model, null, "new-" + room) + '</div><div class="wrt-create-foot"><span class="wrt-state">读取中…</span><button type="button" class="wrt-add">保存</button></div></div></div>';
+    dialog.appendChild(root);
+    $(".wrt-open", root).addEventListener("click", function () {
+      var form = $(".wrt-create", root);
+      form.hidden = !form.hidden;
+      this.textContent = form.hidden ? model.verb : "收起表单";
+      if (!form.hidden) {
+        var first = $(".wrt-fields input, .wrt-fields select, .wrt-fields textarea", root);
+        if (first) first.focus();
+      }
+    });
+    $(".wrt-add", root).addEventListener("click", function () { addRecord(room, root); });
+    $(".wrt-list", root).addEventListener("click", function (evt) {
+      var action = evt.target.getAttribute("data-wrt-action");
+      if (!action) return;
+      var id = evt.target.getAttribute("data-wrt-id");
+      if (action === "edit") beginEdit(room, id, root);
+      if (action === "cancel") { state.editing[room] = ""; render(root); }
+      if (action === "save") saveEdit(room, id, root);
+      if (action === "delete" && window.confirm("确定删除这条记录吗？")) removeRecord(room, id, root);
+    });
+    render(root);
+    // 打开小屋即加载并显示已有内容；新增按钮只负责展开填写表单。
+    loadRecords(room);
+  }
+  function attach() {
+    Array.prototype.forEach.call(document.querySelectorAll("article.dialog"), function (dialog) {
+      var room = roomForDialog(dialog);
+      if (room) mount(room, dialog);
+    });
+  }
+  function addStyle() {
+    var style = document.createElement("style");
+    style.textContent = [
+      "article.dialog.wrt-rebuilt>:not(.dialog-close):not(.dialog-kicker):not(.dialog-heading):not(.wrt-room-table){display:none!important}article.dialog.wrt-rebuilt{color:#34271f!important}",
+      ".wrt-room-table{margin-top:14px;padding-top:14px;border-top:1px solid #ead9c3;font-family:'Noto Sans SC','PingFang SC',sans-serif;color:#34271f}",
+      ".wrt-summary{display:flex;align-items:center;justify-content:space-between;gap:12px}.wrt-summary>div{display:flex;flex-direction:column;gap:1px}.wrt-summary span{font-size:11px;letter-spacing:.08em;color:#866f5b}.wrt-summary strong{font-size:16px;color:#33241b}.wrt-role{display:flex;align-items:center;gap:6px;margin-top:4px}.wrt-role small{font-size:11px;color:#8a735f}.wrt-role-pill{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:11px;font-weight:800}.wrt-role-creator{background:#fde7dd;color:#b75c49}.wrt-role-maker{background:#e7ecf7;color:#576f9d}.wrt-role-designer{background:#f2e4f7;color:#8e58a3}.wrt-role-student{background:#e4f1e6;color:#4e8658}.wrt-role-life{background:#fff0cf;color:#9b711b}",
+      "[data-wrt-role=creator]{--role-accent:#d67e62}[data-wrt-role=maker]{--role-accent:#6d83b2}[data-wrt-role=designer]{--role-accent:#a36cbb}[data-wrt-role=student]{--role-accent:#63a06e}[data-wrt-role=life]{--role-accent:#d29a34}[data-wrt-role] .wrt-platform-progress i{background:var(--role-accent)!important}[data-wrt-role] .wrt-open,[data-wrt-role] .wrt-add{background:var(--role-accent)!important}",
+      ".wrt-open,.wrt-add{border:0;border-radius:9px;padding:8px 12px;font:inherit;font-weight:700;cursor:pointer;background:var(--section-accent,#6cae68);color:#fff;white-space:nowrap}.wrt-open:hover,.wrt-add:hover{filter:brightness(.96)}",
+      ".wrt-workspace{margin-top:12px;border-radius:12px;padding:12px;background:#fffaf2;border:1px solid #e4d2ba;box-shadow:0 4px 12px rgba(91,62,38,.08)}.wrt-list{display:flex;flex-direction:column;gap:8px;max-height:330px;overflow:auto;margin-bottom:12px}.wrt-empty,.wrt-platform-empty{margin:8px 0;color:#786452;text-align:center;font-size:13px}",
+      ".wrt-platform{display:grid;gap:6px;padding:9px;border:1px solid #eadbc7;border-radius:10px;background:#fffdf9}.wrt-platform-head{display:flex;justify-content:space-between;align-items:center;color:#5d4331}.wrt-platform-head strong{font-size:14px}.wrt-platform-head span{font-size:12px;color:#927a64}",
+      ".wrt-record{display:flex;align-items:flex-start;gap:8px;padding:9px;border-radius:8px;background:#fff;border:1px solid #eee1d1}.wrt-record-main{min-width:0;flex:1}.wrt-record-main strong{display:block;word-break:break-word;font-size:13px;color:#34271f}.wrt-meta{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}.wrt-meta span{font-size:11px;padding:2px 6px;border-radius:999px;background:#f4eadc;color:#6a5040}",
+      ".wrt-record-actions{display:flex;gap:5px;flex:none}.wrt-record-actions button{border:1px solid #e5d2bb;background:#fffaf3;color:#6d503a;font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer}.wrt-record-actions button:hover{background:#f4e5d1}.wrt-record-actions .danger{color:#bd5d4f}",
+      ".wrt-fields,.wrt-editor{display:grid;grid-template-columns:1fr 1fr;gap:8px}.wrt-field{display:grid;gap:4px}.wrt-field span{font-size:12px;color:#604a39}.wrt-field:has(textarea){grid-column:1/-1}.wrt-field:has(input[type=checkbox]){grid-column:1/-1}.wrt-field.check{display:block}.wrt-check-label{display:flex;gap:7px;align-items:center;font-size:13px;color:#4c382a;cursor:pointer}.wrt-check-label input{accent-color:var(--section-accent,#6cae68)}",
+      ".wrt-field input,.wrt-field textarea,.wrt-field select,.wrt-editor input,.wrt-editor textarea,.wrt-editor select{width:100%;border:1px solid #dcc7ae;background:#fff;color:#33241b;border-radius:7px;padding:8px 9px;font:inherit;font-size:13px;outline:none}.wrt-field input::placeholder,.wrt-field textarea::placeholder{color:#a28b75}.wrt-field input:focus,.wrt-field textarea:focus,.wrt-field select:focus,.wrt-editor input:focus,.wrt-editor textarea:focus,.wrt-editor select:focus{border-color:var(--section-accent,#6cae68);box-shadow:0 0 0 3px rgba(108,174,104,.14)}.wrt-field textarea,.wrt-editor textarea{min-height:58px;resize:vertical}.wrt-create{margin-top:12px;padding-top:12px;border-top:1px dashed #ddc7ad}.wrt-create[hidden]{display:none}.wrt-create-foot{display:flex;align-items:center;justify-content:space-between;margin-top:9px;gap:8px}.wrt-state{font-size:12px;color:#6b8568}.wrt-state.offline{color:#b95d4f}.wrt-record.editing{display:block}.wrt-record.editing .wrt-record-actions{justify-content:flex-end;margin-top:8px}",
+      ".wrt-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.wrt-card-stack{display:grid;gap:7px}.wrt-card{position:relative;display:flex;align-items:flex-start;gap:9px;min-width:0;padding:11px;border:1px solid #e8d8c4;border-radius:12px;background:linear-gradient(135deg,#fffdf9,#fff7ee);box-shadow:0 2px 7px rgba(92,63,37,.06);overflow:hidden}.wrt-card-body{min-width:0;flex:1}.wrt-card-title{color:#33241b;font-size:14px;font-weight:800;line-height:1.35;word-break:break-word}.wrt-card-sub{margin-top:3px;color:#7a6552;font-size:12px;line-height:1.45;word-break:break-word}.wrt-card-top{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:5px}.wrt-card-actions{position:absolute;right:8px;top:8px;display:flex;gap:3px;opacity:0;transition:opacity .15s}.wrt-card:hover .wrt-card-actions,.wrt-card-editing .wrt-card-actions{opacity:1}.wrt-card-actions button{border:0;border-radius:5px;background:#f8eadb;color:#70523a;padding:3px 5px;font-size:11px;cursor:pointer}.wrt-card-actions button.danger{color:#bd5d4f}.wrt-card-actions button.primary{background:var(--section-accent,#6cae68);color:#fff}.wrt-chip-row{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:8px}.wrt-badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 7px;background:#eee6f5;color:#70557d;font-size:11px;font-weight:700}.wrt-badge.priority{background:#fbe9dc;color:#ae633d}.wrt-badge.success{background:#ddf0df;color:#4e8c56}.wrt-badge.idea{background:#fff0cf;color:#9a6a18}.wrt-badge.fitness{background:#e0f0e1;color:#427a4b}.wrt-badge.analytics{background:#dff1f2;color:#40787c}.wrt-badge.travel{background:#e0e6f8;color:#53699c}.wrt-badge.asset{background:#eee3f5;color:#865bad}.wrt-date,.wrt-minute{color:#8e7966;font-size:11px}.wrt-plan-check{width:27px;height:27px;display:grid;place-items:center;border:2px solid #e4ac82;border-radius:50%;color:#c5774c;font-weight:800;flex:none}.wrt-plan-check.done{background:#75ad72;border-color:#75ad72;color:#fff}.wrt-card-plan.is-done{opacity:.72}.wrt-idea-icon{color:#e1a145;font-size:21px;line-height:1;flex:none}.wrt-heat{display:flex;gap:2px}.wrt-heat i{width:6px;height:6px;border-radius:50%;background:#e7d8bd}.wrt-heat i.on{background:#ec9d48}.wrt-content-stage{align-self:stretch;display:flex;align-items:center;justify-content:center;min-width:47px;padding:5px;border-radius:8px;background:#e7eefb;color:#5572a9;font-size:11px;font-weight:800}.wrt-fitness-ring{width:29px;height:29px;display:grid;place-items:center;flex:none;border:2px solid #8ebd8d;border-radius:50%;color:#4e8752;font-weight:800}.wrt-fitness-ring.done{background:#74ad72;color:#fff}.wrt-analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.wrt-analytics-grid div{padding:6px;border-radius:7px;background:#eef7f5}.wrt-analytics-grid span{display:block;color:#69918e;font-size:10px}.wrt-analytics-grid strong{display:block;margin-top:2px;color:#3b5b58;font-size:11px;line-height:1.4}.wrt-next{margin-top:7px;padding:6px 8px;border-left:3px solid #75b6b1;background:#f4fbfa;color:#557a77;font-size:11px;line-height:1.45}.wrt-travel-orb{width:28px;height:28px;flex:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff 0 14%,#c7d7fb 16% 36%,#788ed0 38% 100%);box-shadow:0 2px 5px rgba(92,111,177,.3)}.wrt-travel-detail{margin-top:5px;color:#6e7fa8;font-size:11px}.wrt-mini-list{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}.wrt-mini-list span{font-size:10px;color:#7785a5}.wrt-asset-symbol{color:#a06fc5;font-size:20px;line-height:1}.wrt-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:7px}.wrt-tags span{padding:2px 5px;border-radius:5px;background:#f0e7f6;color:#895caf;font-size:10px}.wrt-card-editing{display:block;grid-column:1/-1}.wrt-card-editing .wrt-card-actions{position:static;justify-content:flex-end;margin-top:8px;opacity:1}.wrt-platform{display:grid;gap:8px;padding:11px;border:1px solid #e8d8c4;border-radius:12px;background:#fffdf9}.wrt-platform-head{display:flex;align-items:center;justify-content:space-between;color:#58402d}.wrt-platform-head strong{font-size:14px}.wrt-platform-head span{color:#947c67;font-size:12px}.wrt-platform-progress{height:7px;overflow:hidden;border-radius:99px;background:#f0e5d5}.wrt-platform-progress i{display:block;height:100%;border-radius:inherit;background:var(--section-accent,#72ad7a);transition:width .2s}.wrt-platform .wrt-card{border-radius:9px}.wrt-platform-empty{margin:4px 0;color:#96806b;font-size:12px}.wrt-list{max-height:420px!important}",
+      ".wrt-toast{position:fixed;z-index:10001;left:50%;bottom:20px;transform:translateX(-50%);padding:8px 14px;border-radius:999px;background:#2e2117;color:#f6ead8;border:1px solid #d8a45d;opacity:0;pointer-events:none;transition:opacity .2s;font-size:13px}.wrt-toast.show{opacity:1}.wrt-toast.error{border-color:#e17b6e;color:#ffd4cd}",
+      "@media(max-width:560px){.wrt-fields,.wrt-editor{grid-template-columns:1fr}.wrt-field:has(textarea),.wrt-field:has(input[type=checkbox]){grid-column:auto}}"
+    ].join("\n");
+    document.head.appendChild(style);
+    var toastNode = document.createElement("div"); toastNode.id = "wrt-toast"; toastNode.className = "wrt-toast"; document.body.appendChild(toastNode);
+  }
+  function init() {
+    loadCache();
+    state.activeRole = currentRole();
+    addStyle(); attach();
+    new MutationObserver(attach).observe(document.body, { childList: true, subtree: true });
+    // 原版职业选择器写入 workspace localStorage；同页不会触发 storage 事件，因此轻量轮询刷新可见小屋。
+    setInterval(refreshRoleIfChanged, 450);
+    setTimeout(function () { if (dbApi()) { Object.keys(MODELS).forEach(function (room) { if (document.querySelector('[data-wrt-room="' + room + '"]')) loadRecords(room); }); } }, 1300);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
+
+</script>
+
+<!-- ===== 城市麦当劳 · 经营模拟看板 入口（追加层，不影响原 3D 小屋） ===== -->
+<a id="mcd-entry" href="https://www.workbuddy.cn/space/d/6fpJOhy9hjgnF16Qq3MOsZ" target="_blank" rel="noopener"
+   aria-label="打开城市麦当劳 3D 经营模拟看板" title="城市麦当劳 · 3D 经营模拟看板">
+  <span class="mcd-entry-badge">M</span>
+  <span class="mcd-entry-txt"><b>城市麦当劳</b><i>经营模拟看板</i></span>
+</a>
+<style>
+  #mcd-entry{
+    position:fixed; right:18px; bottom:74px; z-index:9998;
+    text-decoration:none;
+    display:flex; align-items:center; gap:10px;
+    padding:9px 16px 9px 10px; border-radius:999px; cursor:pointer;
+    background:linear-gradient(135deg,#e8a410 0%,#ffbc1f 45%,#ffd75e 100%);
+    color:#2b1d00; border:1px solid rgba(255,255,255,.35);
+    box-shadow:0 10px 28px rgba(0,0,0,.42), 0 0 0 0 rgba(255,188,31,.5);
+    font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    transition:transform .18s ease, box-shadow .18s ease;
+    user-select:none; -webkit-tap-highlight-color:transparent;
+  }
+  #mcd-entry:hover{ transform:translateY(-3px); box-shadow:0 14px 34px rgba(0,0,0,.5), 0 0 0 6px rgba(255,188,31,.16); }
+  #mcd-entry:focus-visible{ outline:3px solid #fff; outline-offset:3px; }
+  #mcd-entry .mcd-entry-badge{
+    width:30px; height:30px; border-radius:50%; flex:0 0 30px;
+    display:flex; align-items:center; justify-content:center;
+    background:#c8372b; color:#ffbc1f; font-weight:900; font-size:15px;
+    border:2px solid rgba(255,255,255,.55);
+  }
+  #mcd-entry .mcd-entry-txt{ display:flex; flex-direction:column; line-height:1.2; }
+  #mcd-entry .mcd-entry-txt b{ font-size:13.5px; font-weight:800; letter-spacing:.2px; }
+  #mcd-entry .mcd-entry-txt i{ font-size:10.5px; font-style:normal; opacity:.72; }
+  @media (max-width:560px){
+    #mcd-entry{ right:12px; bottom:16px; padding:8px 13px 8px 8px; }
+    #mcd-entry .mcd-entry-txt i{ display:none; }
+  }
+</style>
+
+<script>
+(function(){
+  if (window.__MCD_ENTRY__) return;
+  window.__MCD_ENTRY__ = true;
+  // 入口是原生 <a target="_blank">，浏览器默认行为即可打开游戏；
+  // 这里只做一次存在性校验（防止被页面其它脚本移除）。
+  function ensure(){
+    var el = document.getElementById("mcd-entry");
+    if (el && !el.getAttribute("href")) el.setAttribute("href", "https://www.workbuddy.cn/space/d/6fpJOhy9hjgnF16Qq3MOsZ");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensure);
+  else ensure();
+  setInterval(ensure, 2000);
+})();
+</script></script>
+</body>
+</html>

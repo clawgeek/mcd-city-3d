@@ -1,0 +1,2546 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>城市麦当劳 · 经营模拟看板</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffbc1f'/%3E%3Cpath d='M7 22V13a9 9 0 0 1 18 0v9' fill='none' stroke='%23c8372b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#14100c; --bg2:#1d1710; --panel:#241c14; --panel2:#2c2219; --panel3:#362a1e;
+    --line:#40311f; --line2:#52402a;
+    --gold:#ffbc1f; --gold2:#e8a410; --red:#e8382c; --green:#4ec26a; --cyan:#38bdf8;
+    --ink:#f6ecdc; --ink2:#c9b89c; --ink3:#8f7d64;
+    --dine:#ffbc1f; --deliver:#38bdf8;
+    --shadow:0 10px 34px rgba(0,0,0,.45);
+    --r:14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:radial-gradient(1200px 700px at 20% -10%,#2b2115 0%,#14100c 60%);
+    color:var(--ink);font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    overflow:hidden;
+  }
+  #app{display:flex;height:100vh;width:100vw;overflow:hidden}
+  /* ---------- 左侧 3D 城市舞台 ---------- */
+  #stageWrap{flex:1 1 58%;position:relative;min-width:0;overflow:hidden;background:#0d0b09}
+  #stage{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #stageHud{position:absolute;top:0;left:0;right:0;padding:14px 18px;display:flex;gap:10px;align-items:flex-start;
+    background:linear-gradient(180deg,rgba(10,8,6,.88),rgba(10,8,6,0));pointer-events:none;flex-wrap:wrap}
+  .clockCard{background:rgba(20,16,12,.78);border:1px solid var(--line);border-radius:12px;padding:8px 14px;
+    backdrop-filter:blur(8px);box-shadow:var(--shadow)}
+  .clockCard b{font-size:22px;letter-spacing:.5px;color:var(--gold);font-variant-numeric:tabular-nums}
+  .clockCard span{display:block;font-size:11px;color:var(--ink3);margin-top:1px}
+  #speedBtns{pointer-events:auto;display:flex;gap:6px;margin-left:auto;background:rgba(20,16,12,.78);
+    border:1px solid var(--line);border-radius:12px;padding:6px;backdrop-filter:blur(8px)}
+  #speedBtns button{background:var(--panel2);border:1px solid var(--line2);color:var(--ink2);border-radius:8px;
+    padding:6px 11px;font-size:12px;cursor:pointer;font-family:inherit}
+  #speedBtns button.on{background:var(--gold);color:#2b1d00;border-color:var(--gold);font-weight:700}
+  #stageLegend{position:absolute;left:16px;bottom:16px;background:rgba(20,16,12,.8);border:1px solid var(--line);
+    border-radius:12px;padding:10px 13px;font-size:11.5px;color:var(--ink2);backdrop-filter:blur(8px);max-width:250px}
+  #stageLegend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  #stageLegend div{margin:4px 0}
+  #toast{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);background:rgba(28,22,16,.95);
+    border:1px solid var(--line2);color:var(--ink);padding:9px 18px;border-radius:999px;font-size:13px;
+    opacity:0;transition:opacity .25s;pointer-events:none;box-shadow:var(--shadow);max-width:80%;text-align:center}
+  #toast.show{opacity:1}
+  /* ---------- 右侧看板 ---------- */
+  #dash{flex:1 1 42%;min-width:340px;max-width:640px;background:var(--bg2);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;overflow:hidden}
+  #tabs{display:flex;gap:2px;padding:10px 12px 0;background:var(--bg2);border-bottom:1px solid var(--line);flex-shrink:0}
+  #tabs button{flex:1;background:none;border:none;border-bottom:2px solid transparent;color:var(--ink3);
+    padding:9px 4px;font-size:13px;cursor:pointer;font-family:inherit;transition:.15s}
+  #tabs button.on{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
+  #panels{flex:1;overflow-y:auto;padding:14px}
+  #panels::-webkit-scrollbar{width:8px}
+  #panels::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+  .panel{display:none;animation:fade .22s ease}
+  .panel.on{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:14px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;position:relative;overflow:hidden}
+  .kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--gold)}
+  .kpi.c2::after{background:var(--cyan)} .kpi.c3::after{background:var(--green)}
+  .kpi.c4::after{background:var(--red)} .kpi.c5::after{background:var(--violet,#a78bfa)}
+  .kpi .lb{font-size:11px;color:var(--ink3);margin-bottom:3px}
+  .kpi .vl{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+  .kpi .dl{font-size:11px;margin-top:2px;color:var(--ink3)}
+  .up{color:var(--green)} .down{color:var(--red)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:13px 14px;margin-bottom:12px}
+  .card h3{margin:0 0 11px;font-size:13px;color:var(--ink);font-weight:600;display:flex;align-items:center;gap:7px}
+  .card h3 .tag{font-size:10px;color:var(--ink3);background:var(--panel3);padding:2px 7px;border-radius:6px;font-weight:400}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;color:var(--ink3);font-weight:500;font-size:11px;padding:6px 6px;border-bottom:1px solid var(--line)}
+  td{padding:7px 6px;border-bottom:1px solid rgba(64,49,31,.45);color:var(--ink2);font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  td.n{text-align:right} th.n{text-align:right}
+  td b{color:var(--ink);font-weight:600}
+  .bar{height:6px;background:var(--panel3);border-radius:99px;overflow:hidden;min-width:52px}
+  .bar i{display:block;height:100%;border-radius:99px;background:var(--gold);transition:width .3s}
+  .bar.d i{background:var(--cyan)}
+  .bar.g i{background:var(--green)}
+  .bar.r i{background:var(--red)}
+  .chart{width:100%;height:170px;display:block}
+  .split{display:flex;gap:10px}
+  .split>*{flex:1;min-width:0}
+  .ctl{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+  .ctl button{background:var(--panel2);border:1px solid var(--line2);color:var(--ink);border-radius:9px;padding:7px 12px;
+    font-size:12.5px;cursor:pointer;font-family:inherit;transition:.15s}
+  .ctl button:hover{background:var(--panel3);border-color:var(--gold)}
+  .ctl button.on{background:var(--gold);color:#2b1d00;border-color:var(--gold);font-weight:700}
+  .ctl button:disabled{opacity:.4;cursor:not-allowed}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(64,49,31,.4)}
+  .row:last-child{border-bottom:none}
+  .row .n{font-size:13px} .row .n small{display:block;color:var(--ink3);font-size:11px;margin-top:2px}
+  .row .v{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+  .stepper{display:flex;align-items:center;gap:6px}
+  .stepper button{width:26px;height:26px;border-radius:7px;background:var(--panel3);border:1px solid var(--line2);
+    color:var(--ink);cursor:pointer;font-size:15px;line-height:1;font-family:inherit}
+  .stepper b{min-width:22px;text-align:center;font-variant-numeric:tabular-nums}
+  .badge{font-size:10.5px;padding:2px 7px;border-radius:99px;background:var(--panel3);color:var(--ink2)}
+  .badge.ok{background:rgba(78,194,106,.16);color:var(--green)}
+  .badge.warn{background:rgba(255,188,31,.16);color:var(--gold)}
+  .badge.bad{background:rgba(232,56,44,.18);color:#ff8a80}
+  .hint{font-size:11.5px;color:var(--ink3);line-height:1.7}
+  .progress{height:9px;background:var(--panel3);border-radius:99px;overflow:hidden}
+  .progress i{display:block;height:100%;background:linear-gradient(90deg,var(--gold2),var(--gold));transition:width .4s}
+  .events{max-height:250px;overflow-y:auto}
+  .ev{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid rgba(64,49,31,.35);font-size:12px;align-items:flex-start}
+  .ev:last-child{border-bottom:none}
+  .ev .tm{color:var(--ink3);font-variant-numeric:tabular-nums;font-size:11px;flex-shrink:0;width:38px}
+  .ev .tx{color:var(--ink2);line-height:1.5}
+  .ev .tx b{color:var(--ink)}
+  .ev.g .tx b{color:var(--green)} .ev.r .tx b{color:#ff8a80} .ev.y .tx b{color:var(--gold)}
+  .mini{font-size:11px;color:var(--ink3)}
+  #modalWrap{position:fixed;inset:0;background:rgba(6,5,4,.82);display:none;align-items:center;justify-content:center;z-index:99;
+    backdrop-filter:blur(4px)}
+  #modalWrap.on{display:flex}
+  #modal{background:var(--panel);border:1px solid var(--line2);border-radius:18px;padding:24px 26px;max-width:520px;width:92%;
+    box-shadow:var(--shadow);max-height:88vh;overflow-y:auto}
+  #modal h2{margin:0 0 6px;font-size:19px;color:var(--gold)}
+  #modal .sub{color:var(--ink3);font-size:12.5px;margin-bottom:16px}
+  #modal .mgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:16px}
+  #modal .mgrid div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+  #modal .mgrid .lb{font-size:11px;color:var(--ink3)} #modal .mgrid .vl{font-size:17px;font-weight:700;margin-top:2px}
+  #modal .btn{background:var(--gold);color:#2b1d00;border:none;border-radius:10px;padding:10px 22px;font-size:14px;
+    cursor:pointer;font-weight:700;font-family:inherit;width:100%}
+  .tier{display:flex;gap:6px;margin-bottom:8px}
+  .tier button{flex:1;background:var(--panel2);border:1px solid var(--line2);color:var(--ink2);padding:9px 4px;
+    border-radius:9px;cursor:pointer;font-size:12px;font-family:inherit}
+  .tier button.on{background:var(--gold);color:#2b1d00;border-color:var(--gold);font-weight:700}
+  @media(max-width:900px){
+    #app{flex-direction:column;overflow-y:auto}
+    #stageWrap{flex:none;height:46vh;min-height:300px}
+    #dash{max-width:none;width:100%;min-width:0;flex:none}
+    #panels{overflow:visible}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stageWrap">
+    <canvas id="stage"></canvas>
+    <div id="stageHud">
+      <div class="clockCard"><b id="clock">07:00</b><span id="dayLabel">第 1 天 · 周一</span></div>
+      <div class="clockCard"><b id="weatherLb">☀️ 晴</b><span id="weatherTip">客流正常</span></div>
+      <div class="clockCard"><b id="cashLb">¥ 8,600</b><span id="cashTip">可周转资金</span></div>
+      <div id="speedBtns">
+        <button data-s="0">⏸</button>
+        <button data-s="1" class="on">1×</button>
+        <button data-s="3">3×</button>
+        <button data-s="8">8×</button>
+      </div>
+    </div>
+    <div id="stageLegend">
+      <div><i style="background:#e04a3a"></i>堂食顾客 · 店前排队</div>
+      <div><i style="background:#38bdf8"></i>外卖顾客 · 取餐区等候</div>
+      <div><i style="background:#ffbc1f"></i>外卖骑手 · 配送途中</div>
+      <div style="margin-top:7px;color:#8f7d64">拖拽旋转视角 · 滚轮缩放<br>点击建筑可打开对应经营面板</div>
+    </div>
+    <div id="toast"></div>
+  </div>
+
+  <div id="dash">
+    <div id="tabs">
+      <button data-t="op" class="on">经营总览</button>
+      <button data-t="order">订单</button>
+      <button data-t="staff">人力</button>
+      <button data-t="supply">供应链</button>
+      <button data-t="report">报表</button>
+    </div>
+    <div id="panels">
+      <div class="panel on" id="p-op"></div>
+      <div class="panel" id="p-order"></div>
+      <div class="panel" id="p-staff"></div>
+      <div class="panel" id="p-supply"></div>
+      <div class="panel" id="p-report"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalWrap"><div id="modal"></div></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./assets/three.module.js",
+    "three/addons/": "./assets/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+window.__THREE_NS__ = THREE;
+window.__GLTFLoader__ = GLTFLoader;
+window.__SkeletonUtils__ = SkeletonUtils;
+window.__Sky__ = Sky;
+window.__RoomEnvironment__ = RoomEnvironment;
+(function(){
+'use strict';
+/* ==========================================================================
+ * 城市麦当劳 · 经营模拟看板（Three.js 3D 版）
+ * - 3D 城市街区：与「AI 红发魔女的工作台」同一套 Three.js r160 + GLTFLoader 管线，
+ *   复用其 GLB 模型（cottage 改造成麦当劳门店、kenney 街景道具、npc 角色）
+ * - 双渠道实时经营模拟：堂食 + 外卖
+ * - 店长运营与管理看板
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------- 常量 */
+const GAME_DB = { saves:'gS14Joll0ceSNMSm7TBFPJ', reports:'7xG7jrU3V3xLcfHHHm1nqL' };
+
+const MENU = [
+  {id:'big',   name:'巨无霸',      price:22, cook:6,  cat:'汉堡'},
+  {id:'chick', name:'香辣鸡腿堡',  price:19, cook:5,  cat:'汉堡'},
+  {id:'fry',   name:'薯条(中)',    price:9,  cook:2,  cat:'小食'},
+  {id:'drink', name:'可乐(中)',    price:7,  cook:1,  cat:'饮料'},
+  {id:'coffee',name:'现磨咖啡',    price:12, cook:3,  cat:'饮料'},
+  {id:'chickn',name:'麦辣鸡腿堡',  price:21, cook:5,  cat:'汉堡'},
+  {id:'mug',   name:'麦乐鸡(6块)', price:26, cook:4,  cat:'小食'}
+];
+const MENU_BY_ID = {}; MENU.forEach(m=>MENU_BY_ID[m.id]=m);
+
+const RAW = { patty:['肉饼','份'], bun:['面包胚','个'], fry:['冷冻薯条','包'], chicken:['鸡腿肉','份'], drink:['可乐糖浆','杯'], coffee:['咖啡豆','份'] };
+
+const WEATHERS = [
+  {id:'sun',   name:'☀️ 晴',   traffic:1.00, tip:'客流正常'},
+  {id:'cloud', name:'⛅ 多云', traffic:0.94, tip:'客流略降'},
+  {id:'rain',  name:'🌧️ 小雨', traffic:0.82, tip:'堂食减少，外卖增加'},
+  {id:'hot',   name:'🔥 高温', traffic:0.90, tip:'冷饮需求上升'},
+  {id:'cold',  name:'❄️ 寒潮', traffic:0.86, tip:'热饮需求上升'}
+];
+
+const WEEK = ['周一','周二','周三','周四','周五','周六','周日'];
+const HOUR_RATE = [0.35,0.22,0.10,0.08,0.10,0.30,0.72,1.00,0.95,0.70,0.55,0.85,1.25,1.30,1.05,0.80,0.90,1.15,1.20,0.85,0.60,0.42]; // 6:00-23:00 客流系数
+
+/* ---------------------------------------------------------------- 统一比例基准
+   全场景使用「1 单位 = 1 米」的米制尺度，所有模型按包围盒归一化到真实尺寸：
+     人物身高 1.70 / 汽车长 4.20 / 摩托长 2.05 / 门店占地 13×11
+   Kenney 工业套件原模型为 2×2 的「模块化工厂单元」，放大后作为街区厂房。 */
+const SCALE = {
+  person: 1.70,        // 成人身高（米）
+  car: 4.20,           // 轿车车长
+  bike: 2.05,          // 配送摩托车车长
+  storeW: 13.0,        // 门店面宽
+  storeD: 11.0,        // 门店进深
+  factory: 11.5,       // 工业厂房单元边长
+  tree: 5.2,           // 行道树高度
+  lamp: 6.4,           // 路灯高度
+  road: 8.4            // 车行道宽
+};
+
+/* ---------------------------------------------------------------- 状态 */
+let S = null;
+let speed = 1, lastT = 0, acc = 0, running = true, panelAcc = 0;
+
+function freshState(){
+  return {
+    day:1, minute:6*60, cash:8600, price:1.0, reputation:0.72,
+    weather:'sun',
+    staff:{ counter:2, cook:3, packer:1, rider:2 },
+    stock:{ patty:90, bun:120, fry:70, chicken:60, drink:200, coffee:80 },
+    deliveryCap:0,
+    orders:[], nextOrderId:1,
+    counters:{ dine:0, deliver:0 },   // 队列
+    inStore:[],                      // 店内顾客
+    riders:[],                       // 骑手
+    stats:{ revenue:0, cost:0, dine:0, deliver:0, served:0, lost:0, waste:0, items:{},
+            hourly:{revenue:[],orders:[],dine:[],deliver:[]} },
+    history:[], events:[],
+    adCampaign:0, stockoutAlert:false
+  };
+}
+S = freshState();
+
+/* ---------------------------------------------------------------- 工具 */
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function ri(a,b){ return Math.floor(rnd(a,b+1)); }
+function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function money(n){ return '¥ '+Math.round(n).toLocaleString('zh-CN'); }
+function fmtTime(m){ const h=Math.floor(m/60), mm=Math.floor(m%60); return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0'); }
+function hhmm(m){ return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
+function today(){ return new Date(); }
+function dayLabel(){ return '第 '+S.day+' 天 · '+WEEK[(S.day-1)%7]; }
+function hour(){ return Math.floor(S.minute/60); }
+function inHour(){ return hour()>=6 && hour()<23; }
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2200); }
+function logEvent(text, cls){ S.events.unshift({t:fmtTime(S.minute), text:text, cls:cls||''}); if(S.events.length>60) S.events.pop(); }
+
+/* ---------------------------------------------------------------- 数据表
+ * 资料库页面 SDK 的真实方法名是 addRecord / updateRecord（不是 create / update）。
+ * 公开分享页与个人空间页都提供这组方法，写入走 database.addRecord。
+ * */
+function dbApi(){
+  const sp = window.__SMART_PAGE__; if(sp&&sp.database) return sp.database;
+  if(window.dbApi){ try{ return window.dbApi(); }catch(e){} }
+  return null;
+}
+async function saveGame(){
+  const payload = JSON.stringify({state:S, speed:speed});
+  try{ localStorage.setItem('mcd-city-save', payload); }catch(e){}
+  const db = dbApi(); if(!db||!db.query) return;
+  const add = db.addRecord||db.create;
+  const upd = db.updateRecord||db.update;
+  if(!add||!upd) return;
+  try{
+    const r = await db.query({databaseId:GAME_DB.saves, pageSize:100});
+    const rows=(r&&r.results)||[];
+    const mine=rows.find(x=>String((x['存档名']&&(x['存档名'].text||x['存档名']))||'')==='main');
+    const props={ '用户标识':{text:'default'}, '存档名':{text:'main'}, '游戏状态':{text:payload},
+                 '更新时间':{date:today().toISOString().slice(0,10)} };
+    if(mine&&mine.recordId) await upd({databaseId:GAME_DB.saves, recordId:mine.recordId, properties:props});
+    else await add({databaseId:GAME_DB.saves, properties:props});
+    S._lastSave='资料库';
+  }catch(e){ S._lastSave='本地（资料库写入不可用）'; }
+}
+async function loadGame(){
+  let raw=null;
+  try{ raw=localStorage.getItem('mcd-city-save'); }catch(e){}
+  if(!raw){ // 尝试资料库
+    const db=dbApi();
+    if(db&&db.query){
+      try{
+        const r=await db.query({databaseId:GAME_DB.saves,pageSize:100});
+        const rows=(r&&r.results)||[]; const mine=rows.find(x=>String(x['存档名'])==='main');
+        if(mine) raw = String((mine['游戏状态']&&(mine['游戏状态'].text||mine['游戏状态']))||'');
+      }catch(e){}
+    }
+  }
+  if(raw){ try{ const o=JSON.parse(raw); if(o&&o.state){ S=o.state; speed=o.speed||1; logEvent('已载入上次经营存档','y'); } }catch(e){} }
+}
+async function pushReport(rec){
+  const db=dbApi(); if(!db) return;
+  const add=db.addRecord||db.create; if(!add) return;
+  try{
+    await add({databaseId:GAME_DB.reports, properties:{
+      '日期':{text:rec.date}, '营收':{number:rec.revenue}, '成本':{number:rec.cost}, '毛利':{number:rec.profit},
+      '订单数':{number:rec.orders}, '堂食单':{number:rec.dine}, '外送单':{number:rec.deliver},
+      '客单价':{number:rec.avg}, '流失率':{number:rec.lossRate}, '评分':{number:rec.score},
+      '明细':{text:rec.detail||''}
+    }});
+  }catch(e){}
+}
+
+/* ---------------------------------------------------------------- 经营模拟 */
+function weatherObj(){ return WEATHERS.find(w=>w.id===S.weather)||WEATHERS[0]; }
+
+function stockOK(item){
+  // 每份商品消耗的原料
+  const need = { big:['patty','bun'], chick:['chicken','bun'], chickn:['chicken','bun'],
+                 fry:['fry'], drink:['drink'], coffee:['coffee'], mug:['chicken'] };
+  return (need[item.id]||[]).every(k=>S.stock[k]>0);
+}
+function consume(item){
+  const need = { big:['patty','bun'], chick:['chicken','bun'], chickn:['chicken','bun'],
+                 fry:['fry'], drink:['drink'], coffee:['coffee'], mug:['chicken'] };
+  (need[item.id]||[]).forEach(k=>{ S.stock[k]=Math.max(0,S.stock[k]-1); });
+}
+
+function arrivalRate(){
+  const h=hour(); if(h<6||h>=23) return 0;
+  let base = HOUR_RATE[h-6]||0;
+  base *= weatherObj().traffic;
+  const wk = (S.day-1)%7;
+  if(wk>=5) base*=1.25;                       // 周末
+  base *= 0.85 + S.reputation*0.4;             // 口碑
+  base *= 1.15 - (S.price-1)*0.5;             // 价格敏感
+  if(S.adCampaign>0) base*=1.3;
+  return base;
+}
+function deliveryShare(){
+  let s = 0.46;
+  if(S.weather==='rain') s+=0.14;
+  if(S.weather==='hot'||S.weather==='cold') s+=0.05;
+  if(S.day%7===5||S.day%7===6) s+=0.06;
+  s += S.adCampaign>0?0.06:0;
+  s -= (S.staff.rider-2)*0.04;
+  return clamp(s,0.18,0.72);
+}
+
+function spawnOrder(){
+  const isDeliver = Math.random() < deliveryShare();
+  const count = isDeliver ? (Math.random()<0.72?1:2) : ri(1,3);
+  const items=[];
+  for(let i=0;i<count;i++){
+    const m = pick(MENU);
+    if(stockOK(m)) items.push(m.id); else S.stockoutAlert=true;
+  }
+  if(!items.length){ S.stats.lost++; return; }
+  const o = {
+    id:S.nextOrderId++, isDeliver:isDeliver,
+    items, price:0, placedAt:S.minute, state:'queued',
+    total:0, customer:null
+  };
+  o.total = items.reduce((a,id)=>a+MENU_BY_ID[id].price,0)*S.price;
+  o.price=o.total;
+  S.orders.push(o);
+  // 记录商品销量
+  items.forEach(id=>{ S.stats.items[id]=(S.stats.items[id]||0)+1; });
+}
+
+function updateOrders(dt){
+  // 1) 排队 → 后厨
+  const cooking = S.orders.filter(o=>o.state==='cooking');
+  const cookCap = S.staff.cook*2;            // 每分钟产能
+  const pending = S.orders.filter(o=>o.state==='queued');
+  let slots = Math.max(0, cookCap - cooking.length);
+  for(const o of pending){
+    if(slots<=0) break;
+    // 堂食队列 vs 外卖队列分开
+    if(o.isDeliver && S.counters.deliver>0){ }
+    o.state='cooking'; o.startedAt=S.minute; o.doneAt=S.minute + Math.ceil(o.items.reduce((a,id)=>a+MENU_BY_ID[id].cook,0)/Math.max(1,S.staff.cook));
+    slots--;
+  }
+  // 2) 出餐
+  S.orders.filter(o=>o.state==='cooking' && S.minute>=o.doneAt).forEach(o=>{
+    o.state = o.isDeliver?'ready':'ready';
+    o.readyAt=S.minute;
+  });
+  // 3) 出餐台 → 堂食取餐 / 外卖打包
+  const packCap = S.staff.packer*3;
+  let pslots=packCap;
+  S.orders.filter(o=>o.state==='ready'&&o.isDeliver).forEach(o=>{
+    if(pslots<=0) return;
+    pslots--; o.state='packing'; o.packedAt=S.minute;
+  });
+  S.orders.filter(o=>o.state==='ready'&&!o.isDeliver).forEach(o=>{
+    if(S.staff.counter<=0) return;
+    o.state='eating'; o.eatStart=S.minute;
+    const cust = { id:o.id, x:0, y:0, seat:null, mood:0.7, orderId:o.id, leaveAt:S.minute+ri(9,16) };
+    S.inStore.push(cust); o.customer=cust;
+  });
+  // 4) 外卖骑手取餐
+  S.orders.filter(o=>o.state==='packing' && !o.rider).forEach(o=>{
+    const rider = S.riders.find(r=>r.state==='idle');
+    if(!rider) return;
+    rider.state='picking'; rider.orderId=o.id; rider.pickAt=S.minute;
+    o.state='delivering'; o.rider=rider.id; o.deliveredAt=S.minute+ri(7,14);
+  });
+  // 5) 外卖送达
+  S.orders.filter(o=>o.state==='delivering' && S.minute>=o.deliveredAt).forEach(o=>{
+    o.state='done';
+    const rider=S.riders.find(r=>r.id===o.rider); if(rider){ rider.state='returning'; rider.backAt=S.minute+ri(3,7); rider.orderId=null; }
+    S.stats.served++; S.stats.revenue += o.price; S.stats.cost += o.price*0.42;
+    if(o.isDeliver) S.stats.deliver++; else S.stats.dine++;
+  });
+  // 6) 堂食顾客吃完离开
+  S.inStore.slice().forEach(c=>{
+    if(S.minute>=c.leaveAt){
+      const o=S.orders.find(x=>x.id===c.orderId);
+      if(o){ o.state='done'; S.stats.served++; S.stats.revenue+=o.price; S.stats.cost+=o.price*0.42; S.stats.dine++; }
+      S.inStore=S.inStore.filter(x=>x!==c);
+    }
+  });
+  // 7) 骑手返回
+  S.riders.forEach(r=>{ if(r.state==='returning' && S.minute>=r.backAt) r.state='idle'; });
+
+  // 8) 超时流失
+  S.orders.slice().forEach(o=>{
+    if(o.state==='queued' && S.minute-o.placedAt>14){ o.state='lost'; S.stats.lost++; S.reputation=clamp(S.reputation-0.004,0,1); }
+    if(o.state==='cooking' && S.minute-o.startedAt>30){ o.state='lost'; S.stats.lost++; S.reputation=clamp(S.reputation-0.004,0,1); }
+  });
+  // 9) 清理已完成
+  S.orders = S.orders.filter(o=>o.state!=='done' && o.state!=='lost');
+}
+
+function updateStock(dt){
+  // 消耗已在出餐时扣；这里做自动补货（消耗成本）
+  const perDay = {patty:70, bun:100, fry:55, chicken:45, drink:150, coffee:60};
+  const openH = Math.max(0, Math.min(23,Math.floor(S.minute/60))-6);
+  const frac = openH/17;
+  Object.keys(perDay).forEach(k=>{
+    const need = perDay[k]*frac;
+    if(S.stock[k] <= perDay[k]*0.12 && S.cash>300){
+      const add = Math.ceil(perDay[k]*0.6);
+      const cost = add*({patty:6,bun:2,fry:4,chicken:7,drink:2,coffee:5}[k]);
+      if(S.cash-cost>0){ S.stock[k]+=add; S.cash-=cost; S.stats.cost+=cost; }
+    }
+  });
+  if(S.stock.patty<=0||S.stock.bun<=0){
+    if(!S.stockoutAlert){ logEvent('关键原料告罄，顾客开始流失！','r'); toast('⚠️ 原料告罄，请尽快补货'); }
+    S.stockoutAlert=true;
+  } else S.stockoutAlert=false;
+}
+
+function endDay(){
+  const st=S.stats;
+  const avg = st.served? st.revenue/st.served : 0;
+  const totalOrders = st.dine+st.deliver;
+  const lossRate = totalOrders? st.lost/(st.lost+totalOrders):0;
+  // 综合评分：营收达成(30) + 流失控制(30) + 口碑(20) + 客单价健康度(20)
+  const revScore = clamp(Math.round(st.revenue/7000*30),0,30);
+  const lossScore = Math.round((1-Math.min(1,lossRate))*30);
+  const repScore = Math.round(S.reputation*20);
+  const avgScore = clamp(Math.round(Math.min(1,(avg-12)/26)*20),0,20);
+  const score = clamp(revScore+lossScore+repScore+avgScore,0,100);
+  const rec = { date: today().toISOString().slice(0,10), revenue:Math.round(st.revenue), cost:Math.round(st.cost),
+    profit:Math.round(st.revenue-st.cost), orders:totalOrders, dine:st.dine, deliver:st.deliver,
+    avg:Math.round(avg*10)/10, lossRate:Math.round(lossRate*1000)/10, score:score,
+    detail: JSON.stringify({items:st.items, weather:S.weather, reputation:S.reputation}) };
+  S.history.unshift(rec);
+  pushReport(rec);
+  const modal=document.getElementById('modal');
+  modal.innerHTML = '<h2>第 '+S.day+' 天 · 营业结算</h2><div class="sub">'+dayLabel()+' · '+weatherObj().name+'</div>'+
+    '<div class="mgrid">'+
+      '<div><div class="lb">营业额</div><div class="vl">'+money(rec.revenue)+'</div></div>'+
+      '<div><div class="lb">净利润</div><div class="vl" style="color:'+(rec.profit>=0?'var(--green)':'var(--red)')+'">'+money(rec.profit)+'</div></div>'+
+      '<div><div class="lb">订单总数</div><div class="vl">'+rec.orders+'</div></div>'+
+      '<div><div class="lb">客单价</div><div class="vl">¥'+rec.avg+'</div></div>'+
+      '<div><div class="lb">堂食 / 外卖</div><div class="vl">'+rec.dine+' / '+rec.deliver+'</div></div>'+
+      '<div><div class="lb">流失率</div><div class="vl">'+rec.lossRate+'%</div></div>'+
+    '</div>'+
+    '<div class="hint" style="margin-bottom:14px">'+
+      '经营评分 <b style="color:var(--gold)">'+rec.score+'</b> 分。'+
+      (rec.lossRate>12?'排队过长导致流失偏高，建议增派人手或降低单品价格。':'')+
+      (rec.deliver>rec.dine?'外卖占比高，注意备货量与骑手配比。':'堂食为主，堂内动线是关键。')+
+      (rec.profit<0?'本日亏损，明天需要调整成本结构。':' ')+
+    '</div>'+
+    '<button class="btn" onclick="document.getElementById(\'modalWrap\').classList.remove(\'on\')">开始第 '+(S.day+1)+' 天</button>';
+  document.getElementById('modalWrap').classList.add('on');
+  // 重置一天
+  const keep={cash:S.cash, day:S.day+1, price:S.price, reputation:S.reputation, staff:S.staff,
+              weather:pick(WEATHERS).id, stock:S.stock, ad:S.adCampaign};
+  const hist=S.history;
+  S = freshState();
+  S.cash=keep.cash; S.day=keep.day; S.price=keep.price; S.reputation=keep.reputation;
+  S.staff=keep.staff; S.weather=keep.weather; S.stock=keep.stock; S.adCampaign=keep.ad;
+  S.history=hist;
+  // 开局天气
+  logEvent('第 '+S.day+' 天开业，天气 '+weatherObj().name, 'y');
+  saveGame();
+}
+
+/* ================================================================ 3D 场景
+ * Three.js 真实 3D 城市街区 —— 与「AI 红发魔女的工作台」同一套建模管线：
+ *   · three r160（与工作台 bundle 同版本：SRGBColorSpace / ACESFilmic / PCFSoftShadowMap）
+ *   · GLTFLoader 加载工作台同款 GLB 模型（cottage.glb 改造成麦当劳门店、kenney 街景道具、npc 角色）
+ *   · 低多边形 + 温暖光照，PerspectiveCamera 可拖拽旋转/缩放
+ * ===================================================================== */
+const THREE = window.__THREE_NS__;
+const Stage = {
+  renderer:null, scene:null, camera:null, root:null,
+  models:{},          // 加载到的 glb 缓存
+  actors:[],          // 顾客 / 骑手 / 车 等动态对象
+  props:[],           // 静态装饰
+  vehicles:[],        // 城市交通车辆
+  riderVehicles:[],   // 外卖骑手配送车
+  raycaster:null, mouse:null,
+  camDist:58, camTheta:Math.PI*0.22, camPhi:Math.PI*0.30, camTarget:new THREE.Vector3(0,3.2,0),
+  loaded:false, ready:false,
+  clock:new THREE.Clock()
+};
+window.__STAGE__ = Stage;
+
+/* ---------------- 场景搭建 ---------------- */
+function initStage(){
+  const canvas = document.getElementById('stage');
+  const w = canvas.clientWidth || 900, h = canvas.clientHeight || 700;
+
+  Stage.renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
+  Stage.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+  Stage.renderer.setSize(w, h, false);
+  Stage.renderer.outputColorSpace = THREE.SRGBColorSpace;
+  Stage.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  Stage.renderer.toneMappingExposure = 1.05;
+  Stage.renderer.shadowMap.enabled = true;
+  Stage.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  Stage.scene = new THREE.Scene();
+  Stage.scene.background = new THREE.Color(0x87b4d8);
+  Stage.scene.fog = new THREE.Fog(0x9fc0d8, 55, 130);
+
+  // 环境反射（PMREM）—— 让 KayKit 的 PBR 材质有真实高光
+  try {
+    const pmrem = new THREE.PMREMGenerator(Stage.renderer);
+    const envRT = pmrem.fromScene(new window.__RoomEnvironment__(), 0.04);
+    Stage.scene.environment = envRT.texture;
+  } catch(e) { /* 忽略：无环境反射时仍可渲染 */ }
+
+  // 天空球（Sky.js），随游戏时间改变太阳角度
+  try {
+    const sky = new window.__Sky__();
+    sky.scale.setScalar(200);
+    const u = sky.material.uniforms;
+    u.turbidity.value = 6;
+    u.rayleigh.value = 1.6;
+    u.mieCoefficient.value = 0.005;
+    u.mieDirectionalG.value = 0.85;
+    Stage.scene.add(sky);
+    Stage.sky = sky;
+  } catch(e) {}
+
+  Stage.camera = new THREE.PerspectiveCamera(42, w/h, 0.1, 400);
+
+  // 温暖光照：半球光打底 + 主平行光投影 + 补光
+  const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x6b5a3f, 0.85);
+  Stage.scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffe6b8, 1.5);
+  sun.position.set(18, 26, 14);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 90;
+  sun.shadow.camera.left = -32; sun.shadow.camera.right = 32;
+  sun.shadow.camera.top = 32; sun.shadow.camera.bottom = -32;
+  sun.shadow.bias = -0.0006;
+  Stage.scene.add(sun);
+  Stage.sun = sun;
+  const fill = new THREE.DirectionalLight(0x9fb8ff, 0.32);
+  fill.position.set(-16, 12, -12);
+  Stage.scene.add(fill);
+  Stage.scene.add(new THREE.AmbientLight(0xffe8cc, 0.18));
+
+  Stage.root = new THREE.Group();
+  Stage.scene.add(Stage.root);
+
+  Stage.raycaster = new THREE.Raycaster();
+  Stage.mouse = new THREE.Vector2();
+
+  buildGround();
+  buildStreet();
+  buildStore();
+  buildDeliveryPoint();
+  buildProps();
+
+  // 加载 GLB
+  const loader = new window.__GLTFLoader__();
+  loader.setCrossOrigin('anonymous');
+  const base = 'models/';
+  const loadList = [
+    ['cottage', base+'cottage.glb'],
+    ['delivery_bike', base+'kenney-racing/vehicle-motorcycle.glb']
+  ];
+  // Kenney 自然道具（树木、岩石、花草）
+  const kenney = ['tree_oak','tree_pineRoundB','tree_fat','sign','fence_simple',
+                  'rock_largeA','rock_smallA','stone_largeA','stump_round',
+                  'grass_large','flower_redA','flower_yellowA','mushroom_red','plant_flatTall'];
+  kenney.forEach(k => loadList.push(['k_'+k, base+'kenney/'+k+'.glb']));
+  // KayKit 城市套件（建筑 / 道路 / 车辆 / 街具）
+  const kaykit = ['building_A','building_B','building_C','building_D',
+                  'building_E','building_F','building_G','building_H',
+                  'road_straight','road_straight_crossing','road_corner','road_junction',
+                  'streetlight','bench','trash_A','trash_B','firehydrant',
+                  'trafficlight_A','trafficlight_B','trafficlight_C',
+                  'dumpster','watertower','bush','box_A','box_B',
+                  'car_sedan','car_taxi','car_hatchback','car_police','car_stationwagon'];
+  kaykit.forEach(k => loadList.push(['kk_'+k, base+'kaykit/'+k+'.gltf']));
+  // Kenney 城市工业套件（厂房 / 烟囱 / 水塔 / 集装箱 / 太阳能板 / 风车）—— CC0
+  const industrial = ['building-a','building-c','building-e','building-f','building-g',
+                      'building-h','building-l','building-n','building-r','building-t',
+                      'chimney-large','chimney-medium','water-tower','windmill',
+                      'shipping-container-a','shipping-container-b','shipping-container-c',
+                      'solar-panel-landscape','solar-panel-flat',
+                      'detail-tank','detail-tank-large'];
+  industrial.forEach(k => loadList.push(['ki_'+k, base+'kenney-industrial/'+k+'.glb']));
+  // Kenney Mini Characters 人物（CC0，32 段骨骼动画：idle/walk/pick-up/holding-both 等）
+  const miniChars = [
+    ['km_male_a','character-male-a'], ['km_male_b','character-male-b'],
+    ['km_male_c','character-male-c'], ['km_male_d','character-male-d'],
+    ['km_female_a','character-female-a'], ['km_female_b','character-female-b'],
+    ['km_female_c','character-female-c'], ['km_female_d','character-female-d']
+  ];
+  miniChars.forEach(([k,f]) => loadList.push([k, base+'kenney-mini/'+f+'.glb']));
+  // 工作台 chibi 角色模型（带贴图与动画）—— 保留魔女吉祥物与动物
+  ['witch','npc_boy','npc_doll','cat','alpaca','dog'].forEach(k => loadList.push([k, base+k+'.glb']));
+
+  let pending = loadList.length;
+  loadList.forEach(([key, url]) => {
+    loader.load(url, (gltf) => {
+      gltf.scene.userData.animations = gltf.animations || [];
+      Stage.models[key] = gltf.scene;
+      pending--;
+      if (pending === 0) { Stage.ready = true; decorateLoaded(); }
+    }, undefined, () => { pending--; if (pending === 0) { Stage.ready = true; decorateLoaded(); } });
+  });
+
+  bindStageControls();
+  resizeStage();
+}
+
+/* 修正 GLB 贴图色彩空间 + 阴影（r160 需显式 SRGB，否则贴图偏暗） */
+function fixCharMaterials(obj){
+  obj.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true;
+    const fix = (m) => {
+      if (!m) return;
+      if (m.map) { m.map.colorSpace = THREE.SRGBColorSpace; m.map.needsUpdate = true; }
+      if (m.emissiveMap) m.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+      // 轻微自发光提升角色在阴影中的可见度（不改变整体色调）
+      // 仅角色模型保留轻微自发光（提升阴影中可见度），道具/建筑保持原色
+      if (m.emissive !== undefined && o.userData.__isCharacter) {
+        m.emissive.setHex(0x222222);
+        m.emissiveIntensity = 0.35;
+      }
+      if (m.envMapIntensity !== undefined) m.envMapIntensity = 1.4;
+      m.needsUpdate = true;
+    };
+    if (Array.isArray(o.material)) o.material.forEach(fix);
+    else fix(o.material);
+  });
+}
+
+function decorateLoaded(){
+  // 麦当劳门店：按现代旗舰店参考图设计 —— 深色招牌带 + 金色拱门字标、
+  // 双层玻璃幕墙、明黄色室内楼梯墙、麦咖啡入口（cottage 素材保留在模型库中，不再用作门店）
+  const st = buildModernMcDStore();
+  Stage.storeModel = st;
+  // 户外用餐区 + 菜单牌 + 自行车架
+  enhanceStore(st);
+  buildStreetModels();
+  buildNeighbours();
+  placePropsFromModels();
+  spawnMascotAndAnimals();
+  // 所有 GLB 到齐后清理加载阶段的占位动态对象，确保真实角色模型生效
+  resetDynamicActors();
+  (Stage.riderVehicles || []).forEach(v => Stage.scene.remove(v));
+  Stage.riderVehicles = [];
+  // 所有 GLB 到齐后再创建交通车辆，避免首屏退回程序化占位模型
+  rebuildTrafficVehicles();
+  const riderCount = Math.max(1, S.staff?.rider || 1);
+  for (let i=0; i<riderCount; i++) Stage.riderVehicles.push(makeDeliveryBike());
+}
+
+/* 门店吉祥物（魔女）+ 街区动物（猫/羊驼/狗） */
+function spawnMascotAndAnimals(){
+  // 魔女站在门口迎客
+  const witchSrc = getCharacterSource('witch');
+  if (witchSrc) {
+    const m = window.__SkeletonUtils__.clone(witchSrc);
+    m.visible = true;
+    m.userData.__isCharacter = true;
+    fixCharMaterials(m);
+    scaleObjectToHeight(m, SCALE.person);
+    m.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(m);
+    m.position.y = -b2.min.y;
+    const grp = new THREE.Group();
+    grp.add(m);
+    grp.userData.body = m;
+    const clips = witchSrc.userData.animations || [];
+    if (clips.length) {
+      const mixer = new THREE.AnimationMixer(m);
+      const idle = clips.find(c=>c.name.startsWith('Idle')) || clips[0];
+      const gree = clips.find(c=>c.name.startsWith('Greeting'));
+      const act = mixer.clipAction(gree || idle);
+      act.play();
+      grp.userData.mixer = mixer;
+      grp.userData.clips = { idle: idle, run: clips.find(c=>c.name.startsWith('Run')) || idle };
+      grp.userData.currentAction = act;
+    }
+    grp.position.set(-7.2, 0, 6.2);
+    grp.rotation.y = Math.PI * 0.85;
+    Stage.root.add(grp);
+    Stage.mascot = grp;
+    Stage.actors.push(grp);
+  }
+
+  // 街区动物：猫 / 羊驼 / 狗（按真实体型归一化）
+  Stage.animals = [];
+  const animalDefs = [
+    { key:'cat',    h:0.42, spots:[[-14.5, 4.2],[11.5, 9.5],[26, -3]] },
+    { key:'alpaca', h:1.15, spots:[[-16, 10.5],[24, 11.5]] },
+    { key:'dog',    h:0.62, spots:[[13.5, 3.2],[-11, 9.8],[22, 6.5]] }
+  ];
+  animalDefs.forEach(ad => {
+    const src = getCharacterSource(ad.key);
+    if (!src) return;
+    ad.spots.forEach(([ax, az], i) => {
+      const m = window.__SkeletonUtils__.clone(src);
+      m.visible = true;
+      m.userData.__isCharacter = true;
+      fixCharMaterials(m);
+      scaleObjectToHeight(m, ad.h);
+      m.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(m);
+      m.position.set(ax, -b.min.y, az);
+      m.rotation.y = i * 1.7;
+      const grp = new THREE.Group();
+      grp.add(m);
+      grp.userData.body = m;
+      grp.userData.cx = ax; grp.userData.cz = az;
+      grp.userData._t = i * 2.1;
+      Stage.root.add(grp);
+      Stage.animals.push(grp);
+    });
+  });
+}
+
+/* 生成 Canvas 文字/标识贴图（SRGB） */
+function makeSignTexture(w, h, draw){
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  draw(ctx, w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/* 在 canvas 上画金色双拱 M 标识 */
+function drawGoldenM(ctx, x, baseY, r, lw){
+  ctx.strokeStyle = '#ffbc1f';
+  ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.arc(x + r, baseY, r, Math.PI, 2*Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x + r*3, baseY, r, Math.PI, 2*Math.PI); ctx.stroke();
+  ctx.fillStyle = '#ffbc1f';
+  [x, x + r*2, x + r*4].forEach(lx => {
+    ctx.fillRect(lx - lw/2, baseY, lw, r*0.66);
+  });
+}
+
+/* 现代麦当劳旗舰店（参考图：深色招牌带 + 双层玻璃幕墙 + 明黄楼梯墙 + McCafé） */
+function buildModernMcDStore(){
+  const g = new THREE.Group();
+  const W = SCALE.storeW, D = SCALE.storeD;   // 13m × 11m 真实占地
+  const F1 = 3.6;                    // 一层层高（挑高，符合旗舰店）
+  const BAND = 0.62;                 // 层间白色挑檐
+  const F2 = 3.0;                    // 二层玻璃高
+  const PARA = 1.15;                 // 顶部深色招牌带高
+  const y1 = F1;                     // 一层顶
+  const yBand = y1 + BAND;           // 挑檐顶
+  const y2 = yBand + F2;             // 二层玻璃顶
+  const yTop = y2 + PARA;            // 总高 ≈ 8.4m
+
+  const glassMat = new THREE.MeshStandardMaterial({
+    color:0xbfe0ee, transparent:true, opacity:0.2, roughness:0.06, metalness:0.4,
+    side:THREE.DoubleSide, depthWrite:false
+  });
+  const darkMat  = new THREE.MeshStandardMaterial({ color:0x20262e, roughness:0.6, metalness:0.2 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color:0xeef0f2, roughness:0.55 });
+  const goldMat  = new THREE.MeshStandardMaterial({ color:0xffbc1f, roughness:0.45, metalness:0.25, emissive:0x3a2500, emissiveIntensity:0.3 });
+  const mullMat  = new THREE.MeshStandardMaterial({ color:0x2b3138, roughness:0.5, metalness:0.4 });
+  const floorMat = new THREE.MeshStandardMaterial({ color:0xcbb89a, roughness:0.85 });
+  const yellowMat= new THREE.MeshStandardMaterial({ color:0xf7b500, roughness:0.55, emissive:0x6a4a00, emissiveIntensity:0.25 });
+  const glowMat  = new THREE.MeshStandardMaterial({ color:0x554433, emissive:0xffd9a0, emissiveIntensity:1.05, roughness:0.9 });
+  const roofDeckMat = new THREE.MeshStandardMaterial({ color:0x3c4249, roughness:0.92 });
+
+  const solid = (w,h,d,mat,x,y,z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+    m.position.set(x,y,z); m.castShadow = true; m.receiveShadow = true;
+    g.add(m); return m;
+  };
+
+  /* ---------- 一层 ---------- */
+  // 地坪 + 后墙
+  solid(W+0.3, 0.16, D+0.3, floorMat, 0, 0.08, 0);
+  solid(W, F1, 0.18, darkMat, 0, F1/2, -D/2 + 0.09);
+  // 玻璃幕墙（前 + 左右）
+  const mkGlassWall = (w, h, x, y, z, ry) => {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), glassMat);
+    p.position.set(x, y, z); p.rotation.y = ry;
+    g.add(p); return p;
+  };
+  mkGlassWall(W, F1, 0, F1/2, D/2, 0);
+  mkGlassWall(D, F1, -W/2, F1/2, 0, Math.PI/2);
+  mkGlassWall(D, F1,  W/2, F1/2, 0, Math.PI/2);
+  // 竖梃 + 顶底横梁
+  for (let i=0; i<=8; i++){
+    const x = -W/2 + i*(W/8);
+    solid(0.09, F1, 0.11, mullMat, x, F1/2, D/2);
+    const z = -D/2 + i*(D/8);
+    solid(0.11, F1, 0.09, mullMat, -W/2, F1/2, z);
+    solid(0.11, F1, 0.09, mullMat,  W/2, F1/2, z);
+  }
+  solid(W+0.1, 0.16, 0.13, mullMat, 0, F1-0.08, D/2);
+  solid(W+0.1, 0.16, 0.13, mullMat, 0, 0.08, D/2);
+
+  // 室内：暖光吊顶（透过玻璃发光）
+  const glow1 = new THREE.Mesh(new THREE.BoxGeometry(W-0.3, 0.06, D-0.3), glowMat);
+  glow1.position.set(0, F1-0.14, 0); g.add(glow1);
+  // 明黄色楼梯斜墙（参考图核心视觉）
+  const stair = new THREE.Mesh(new THREE.BoxGeometry(7.2, F1*0.94, 0.24), yellowMat);
+  stair.position.set(1.6, F1*0.47, -1.2);
+  stair.rotation.z = 0.62;
+  stair.castShadow = true;
+  g.add(stair);
+  // 楼梯下实墙
+  solid(4.4, F1*0.92, 0.22, yellowMat, 3.4, F1*0.46, -2.9);
+  // 点餐柜台（参考图：柜台 + 收银屏 + 纸质包装袋）
+  solid(4.2, 1.05, 1.0, darkMat, -2.6, 0.55, 1.9);
+  solid(4.4, 0.1, 1.2, goldMat, -2.6, 1.1, 1.9);
+  const menuTex = makeSignTexture(512, 300, (ctx,w,h) => {
+    ctx.fillStyle = '#241c14'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = '#ffbc1f'; ctx.font = '700 44px Arial'; ctx.textAlign='center';
+    ctx.fillText('MENU', w/2, 60);
+    ctx.fillStyle = '#f6ecdc'; ctx.font = '28px Arial';
+    ['巨无霸  ¥25','麦辣鸡腿堡  ¥22','薯条  ¥12','可乐  ¥9'].forEach((s,i)=>ctx.fillText(s, w/2, 120+i*44));
+  });
+  for (let i=0;i<4;i++){
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.68),
+      new THREE.MeshStandardMaterial({ map:menuTex, emissive:0xffffff, emissiveMap:menuTex, emissiveIntensity:0.5, roughness:0.7 }));
+    scr.position.set(-4.1 + i*1.05, 2.35, 1.42);
+    scr.rotation.y = Math.PI;
+    g.add(scr);
+  }
+  // 收银屏（面向顾客）
+  const posTex = makeSignTexture(256, 192, (ctx,w,h) => {
+    ctx.fillStyle = '#101418'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = '#4ec26a'; ctx.font = '700 30px Arial'; ctx.textAlign='center';
+    ctx.fillText('ORDER', w/2, 52);
+    ctx.fillStyle = '#ffbc1f'; ctx.font = '700 54px Arial';
+    ctx.fillText('#' + (S.nextOrderId || 1).toString().padStart(2,'0'), w/2, 122);
+    ctx.fillStyle = '#f6ecdc'; ctx.font = '22px Arial';
+    ctx.fillText('取餐请往前', w/2, 166);
+  });
+  const posScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.54),
+    new THREE.MeshStandardMaterial({ map:posTex, emissive:0xffffff, emissiveMap:posTex, emissiveIntensity:0.6, roughness:0.5 }));
+  posScreen.position.set(-0.9, 1.55, 2.36);
+  posScreen.rotation.y = Math.PI;
+  g.add(posScreen);
+  // 柜台上的纸袋（参考图：CHECK OUT 纸袋）
+  const bagTex = makeSignTexture(256, 256, (ctx,w,h) => {
+    ctx.fillStyle = '#c9a06a'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = '#8a6234'; ctx.fillRect(0,0,w,26);
+    ctx.fillStyle = '#d0342c'; ctx.font = '700 40px Arial'; ctx.textAlign='center';
+    ctx.fillText('McD', w/2, 128);
+    ctx.fillStyle = '#5a3d1e'; ctx.font = '700 20px Arial';
+    ctx.fillText('CHECK OUT', w/2, 162);
+    ctx.strokeStyle = '#8a6234'; ctx.lineWidth = 3; ctx.strokeRect(14, 180, w-28, 52);
+    ctx.fillStyle = '#5a3d1e'; ctx.font = '16px Arial';
+    ctx.fillText('THANK YOU', w/2, 212);
+  });
+  for (let i=0;i<3;i++){
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.56, 0.26),
+      new THREE.MeshStandardMaterial({ map:bagTex, roughness:0.9 }));
+    bag.position.set(-4.0 + i*0.5, 1.42, 1.95);
+    bag.rotation.y = 0.2 - i*0.18;
+    bag.castShadow = true;
+    g.add(bag);
+  }
+  // 入口双开门 + 金色门柱
+  const doorGlass = new THREE.MeshStandardMaterial({ color:0x9fc6d8, transparent:true, opacity:0.45, roughness:0.1, metalness:0.3 });
+  [-0.55, 0.55].forEach(dx => {
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.02, 2.6, 0.07), doorGlass);
+    door.position.set(dx, 1.3, D/2 + 0.02); g.add(door);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.68, 0.05), mullMat);
+    frame.position.set(dx, 1.34, D/2 - 0.01); g.add(frame);
+  });
+  solid(0.38, F1, 0.38, goldMat, 2.1, F1/2, D/2 - 0.05);
+  // McCafé 招牌（入口左侧）
+  const cafeTex = makeSignTexture(512, 160, (ctx,w,h) => {
+    ctx.fillStyle = '#1d2129'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'italic 700 84px Georgia,serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('McCafé', w/2, h/2 + 4);
+  });
+  const cafeSign = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.78, 0.1),
+    new THREE.MeshStandardMaterial({ map:cafeTex, emissive:0xffffff, emissiveMap:cafeTex, emissiveIntensity:0.35, roughness:0.6 }));
+  cafeSign.position.set(-3.4, 2.75, D/2 + 0.08);
+  g.add(cafeSign);
+  // 24h 小灯箱（入口右侧）
+  const h24Tex = makeSignTexture(128, 128, (ctx,w,h) => {
+    ctx.fillStyle = '#ffbc1f'; ctx.beginPath(); ctx.arc(64,64,60,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#20262e'; ctx.font = '700 56px Arial';
+    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('24', 64, 66);
+  });
+  const h24 = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.56, 0.12),
+    new THREE.MeshStandardMaterial({ map:h24Tex, emissive:0xffbc1f, emissiveMap:h24Tex, emissiveIntensity:0.4, roughness:0.6 }));
+  h24.position.set(3.2, 2.5, D/2 + 0.1);
+  g.add(h24);
+
+  /* ---------- 层间白色挑檐 ---------- */
+  solid(W+0.9, BAND, D+0.9, whiteMat, 0, y1 + BAND/2, 0);
+
+  /* ---------- 二层 ---------- */
+  const y2c = yBand + F2/2;
+  mkGlassWall(W, F2, 0, y2c, D/2, 0);
+  mkGlassWall(D, F2, -W/2, y2c, 0, Math.PI/2);
+  mkGlassWall(D, F2,  W/2, y2c, 0, Math.PI/2);
+  mkGlassWall(W, F2, 0, y2c, -D/2, 0);
+  for (let i=0; i<=8; i++){
+    const x = -W/2 + i*(W/8);
+    solid(0.09, F2, 0.11, mullMat, x, y2c, D/2);
+    solid(0.09, F2, 0.11, mullMat, x, y2c, -D/2);
+    const z = -D/2 + i*(D/8);
+    solid(0.11, F2, 0.09, mullMat, -W/2, y2c, z);
+    solid(0.11, F2, 0.09, mullMat,  W/2, y2c, z);
+  }
+  // 二层暖光吊顶 + 楼梯上口黄墙
+  const glow2 = new THREE.Mesh(new THREE.BoxGeometry(W-0.3, 0.06, D-0.3), glowMat);
+  glow2.position.set(0, y2 - 0.12, 0); g.add(glow2);
+  solid(3.4, F2*0.8, 0.22, yellowMat, 3.0, yBand + F2*0.4, -2.0);
+  // 二层顾客剪影（低多边形座位）
+  const seatMat = new THREE.MeshStandardMaterial({ color:0x8a6f52, roughness:0.8 });
+  [[-3.2,0.8],[-0.8,-1.6],[1.6,1.3],[4.2,-0.6]].forEach(([sx,sz]) => {
+    solid(1.8, 0.55, 0.8, seatMat, sx, yBand + 0.28, sz);
+  });
+
+  /* ---------- 顶部深色招牌带 + 屋顶 ---------- */
+  solid(W+0.6, PARA, D+0.6, darkMat, 0, y2 + PARA/2, 0);
+  // 女儿墙（深色内收）+ 深色平屋面，避免出现大块白屋顶
+  solid(W+0.7, 0.5, 0.22, darkMat, 0, yTop + 0.25, D/2 + 0.24);
+  solid(W+0.7, 0.5, 0.22, darkMat, 0, yTop + 0.25, -D/2 - 0.24);
+  solid(0.22, 0.5, D+0.7, darkMat, -W/2 - 0.24, yTop + 0.25, 0);
+  solid(0.22, 0.5, D+0.7, darkMat,  W/2 + 0.24, yTop + 0.25, 0);
+  solid(W+0.2, 0.1, D+0.2, roofDeckMat, 0, yTop + 0.05, 0);  // 屋面（深灰沥青）
+  solid(1.8, 0.7, 1.3, mullMat, -3.2, yTop + 0.45, -3.2);  // 屋顶设备
+
+  // 主招牌：金色 M + McDonald's 字标
+  const signTex = makeSignTexture(1400, 256, (ctx,w,h) => {
+    ctx.fillStyle = '#20262e'; ctx.fillRect(0,0,w,h);
+    drawGoldenM(ctx, 60, 200, 62, 26);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 118px "Helvetica Neue",Arial,sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText("McDonald's", 420, 128);
+  });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(W*0.9, PARA*0.86),
+    new THREE.MeshStandardMaterial({ map:signTex, emissive:0xffffff, emissiveMap:signTex, emissiveIntensity:0.3, roughness:0.7 }));
+  sign.position.set(0, y2 + PARA/2, D/2 + 0.34);
+  g.add(sign);
+
+  /* ---------- 路边立式招牌（图腾柱） ---------- */
+  const pylon = new THREE.Group();
+  const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 5.4, 0.5), darkMat);
+  pillar.position.y = 2.7; pillar.castShadow = true;
+  const mTex = makeSignTexture(320, 320, (ctx,w,h) => {
+    ctx.fillStyle = '#20262e'; ctx.fillRect(0,0,w,h);
+    drawGoldenM(ctx, 60, 210, 50, 22);
+  });
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(2.1, 2.1, 0.2),
+    new THREE.MeshStandardMaterial({ map:mTex, emissive:0xffffff, emissiveMap:mTex, emissiveIntensity:0.32, roughness:0.65 }));
+  panel.position.y = 6.2; panel.castShadow = true;
+  pylon.add(pillar, panel);
+  pylon.position.set(9.2, 0, 9.6);
+  pylon.rotation.y = -0.5;
+  Stage.root.add(pylon);
+  Stage.props.push(pylon);
+
+  g.userData = { name:'麦当劳门店', cat:'store' };
+  Stage.root.add(g);
+  return g;
+}
+
+/* 门店品牌强化：红色立面带、户外座椅、菜单牌、得来速指示 */
+function enhanceStore(store){
+  const box = new THREE.Box3().setFromObject(store);
+  const size = box.getSize(new THREE.Vector3());
+  const cx = 0, cz = size.z * 0.5;
+
+  // 菜单牌（门侧）
+  const menuBoard = new THREE.Group();
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.9, 0.12),
+    new THREE.MeshStandardMaterial({ color:0x2a1a12, roughness:0.6 }));
+  panel.position.y = 1.35; panel.castShadow = true;
+  const panelTop = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.22, 0.16),
+    new THREE.MeshStandardMaterial({ color:0xd0342c, roughness:0.6 }));
+  panelTop.position.y = 2.4; panelTop.castShadow = true;
+  const post1 = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.07,0.55,8),
+    new THREE.MeshStandardMaterial({ color:0x3a3f46, roughness:0.6, metalness:0.3 }));
+  post1.position.set(-0.6, 0.28, 0);
+  const post2 = post1.clone(); post2.position.x = 0.6;
+  menuBoard.add(panel, panelTop, post1, post2);
+  menuBoard.position.set(size.x*0.5 + 1.6, 0, cz + 1.2);
+  menuBoard.rotation.y = -0.25;
+  Stage.root.add(menuBoard);
+
+  // 户外用餐区：2 张桌子 + 4 把椅子 + 遮阳伞
+  const tableMat = new THREE.MeshStandardMaterial({ color:0xd0342c, roughness:0.65 });
+  const chairMat = new THREE.MeshStandardMaterial({ color:0xf0e6d2, roughness:0.7 });
+  const umbrellaMat = new THREE.MeshStandardMaterial({ color:0xd0342c, roughness:0.75, side:THREE.DoubleSide });
+  [[-2.6, cz+3.4],[2.6, cz+3.4]].forEach(([tx,tz]) => {
+    const t = new THREE.Group();
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.85,0.85,0.08,16), tableMat);
+    top.position.y = 0.72; top.castShadow = true; top.receiveShadow = true;
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.11,0.72,10),
+      new THREE.MeshStandardMaterial({ color:0x3a3f46, roughness:0.6, metalness:0.3 }));
+    leg.position.y = 0.36; leg.castShadow = true;
+    t.add(top, leg);
+    // 伞
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,2.5,8),
+      new THREE.MeshStandardMaterial({ color:0xe8e0d0, roughness:0.6 }));
+    pole.position.y = 1.25; pole.castShadow = true;
+    const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.45, 0.62, 12), umbrellaMat);
+    canopy.position.y = 2.55; canopy.castShadow = true;
+    t.add(pole, canopy);
+    // 4 把椅子
+    for (let a=0;a<4;a++){
+      const ch = new THREE.Group();
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42,0.06,0.42), chairMat);
+      seat.position.y = 0.44; seat.castShadow = true;
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.42,0.42,0.05), chairMat);
+      back.position.set(0,0.66,-0.19); back.castShadow = true;
+      [[-0.17,-0.17],[0.17,-0.17],[-0.17,0.17],[0.17,0.17]].forEach(([lx,lz])=>{
+        const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,0.44,6), chairMat);
+        lg.position.set(lx,0.22,lz); lg.castShadow = true; ch.add(lg);
+      });
+      ch.add(seat, back);
+      const ang = a * Math.PI/2 + Math.PI/4;
+      ch.position.set(Math.cos(ang)*1.15, 0, Math.sin(ang)*1.15);
+      ch.rotation.y = -ang + Math.PI;
+      t.add(ch);
+    }
+    t.position.set(tx, 0, tz);
+    Stage.root.add(t);
+    Stage.props.push(t);
+  });
+
+  // 自行车停放架
+  const rack = new THREE.Group();
+  for (let i=0;i<3;i++){
+    const r = new THREE.Mesh(new THREE.TorusGeometry(0.38,0.035,8,16,Math.PI),
+      new THREE.MeshStandardMaterial({ color:0x8a8f96, roughness:0.5, metalness:0.5 }));
+    r.position.set(-1.2 + i*1.2, 0.38, 0);
+    r.castShadow = true;
+    rack.add(r);
+  }
+  rack.position.set(-size.x*0.5 - 2.2, 0, cz + 1.4);
+  Stage.root.add(rack);
+}
+
+/* ---------------- 地面 / 街道 ---------------- */
+function buildGround(){
+  const g = new THREE.Group();
+  // 大地（工业城市：沥青灰底 + 绿化带）
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(220,220),
+    new THREE.MeshStandardMaterial({ color:0x4a4f45, roughness:1 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  g.add(ground);
+  // 街区地面（水泥地坪）
+  const walk = new THREE.Mesh(
+    new THREE.PlaneGeometry(76, 62),
+    new THREE.MeshStandardMaterial({ color:0x8d867b, roughness:0.95 })
+  );
+  walk.rotation.x = -Math.PI/2;
+  walk.position.set(0, 0.02, 2);
+  walk.receiveShadow = true;
+  g.add(walk);
+  // 绿化带（草坪条）
+  [[-30, 0, 12, 52], [30, 0, 12, 52]].forEach(([gx,gz,gw,gd]) => {
+    const lawn = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd),
+      new THREE.MeshStandardMaterial({ color:0x4a6b3c, roughness:1 }));
+    lawn.rotation.x = -Math.PI/2;
+    lawn.position.set(gx, 0.03, gz);
+    lawn.receiveShadow = true;
+    g.add(lawn);
+  });
+  Stage.root.add(g);
+}
+
+function buildStreet(){
+  // 仅铺设基底（程序化，模型加载前即可完成）
+  const g = new THREE.Group();
+  const roadBase = new THREE.Mesh(
+    new THREE.PlaneGeometry(220, 9.6),
+    new THREE.MeshStandardMaterial({ color:0x3a3835, roughness:0.96 })
+  );
+  roadBase.rotation.x = -Math.PI/2;
+  roadBase.position.set(0, 0.02, -13.5);
+  roadBase.receiveShadow = true;
+  g.add(roadBase);
+  // 车道分隔虚线
+  for (let x=-100; x<=100; x+=5.2){
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.22),
+      new THREE.MeshStandardMaterial({ color:0xd8d2c4, roughness:0.8 }));
+    dash.rotation.x = -Math.PI/2;
+    dash.position.set(x, 0.035, -13.5);
+    g.add(dash);
+  }
+  [-7.4, -19.6].forEach(z => {
+    const sw = new THREE.Mesh(new THREE.PlaneGeometry(220, 5.2),
+      new THREE.MeshStandardMaterial({ color:0x9c948a, roughness:0.94 }));
+    sw.rotation.x = -Math.PI/2; sw.position.set(0, 0.05, z); sw.receiveShadow = true;
+    g.add(sw);
+    const curb = new THREE.Mesh(new THREE.BoxGeometry(220, 0.3, 0.5),
+      new THREE.MeshStandardMaterial({ color:0xb8afa2, roughness:0.88 }));
+    curb.position.set(0, 0.15, z + (z>-13.5? 2.6 : -2.6));
+    curb.receiveShadow = true; curb.castShadow = true;
+    g.add(curb);
+  });
+  Stage.root.add(g);
+  Stage.streetGroup = g;
+}
+
+/* KayKit 道具需等模型加载完再铺（由 decorateLoaded 调用） */
+function buildStreetModels(){
+  const g = new THREE.Group();
+  const R = 4.4;
+  const placeTile = (key, x, z, ry) => {
+    const src = Stage.models[key];
+    if (!src) return null;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    m.scale.setScalar(R);
+    m.position.set(x, 0.03, z);
+    if (ry) m.rotation.y = ry;
+    g.add(m);
+    return m;
+  };
+  // 主车道瓦片（沿 x 轴延伸）
+  for (let x=-52; x<=52; x+=8.8) placeTile('kk_road_straight', x, -13.5, Math.PI/2);
+  // 店前斑马线
+  placeTile('kk_road_straight_crossing', -4.4, -13.5, Math.PI/2);
+  placeTile('kk_road_straight_crossing',  4.4, -13.5, Math.PI/2);
+
+  // 路灯 + 夜间点光源
+  Stage.lamps = Stage.lamps || [];
+  const lampSpots = [[-30,-6.4],[-15,-6.4],[0,-6.4],[15,-6.4],[30,-6.4],
+                     [-22,-20.6],[-7,-20.6],[8,-20.6],[23,-20.6]];
+  lampSpots.forEach(([x,z]) => {
+    const src = Stage.models['kk_streetlight'];
+    let lamp;
+    if (src) {
+      lamp = src.clone(true);
+      fixCharMaterials(lamp);
+      scaleObjectToHeight(lamp, SCALE.lamp);
+    } else lamp = new THREE.Group();
+    lamp.position.set(x, 0, z);
+    lamp.rotation.y = z > -13.5 ? Math.PI : 0;
+    const pl = new THREE.PointLight(0xffcc77, 0, 14, 2);
+    pl.position.set(0, 5.4, z>-13.5 ? -1.2 : 1.2);
+    lamp.add(pl);
+    lamp.userData.light = pl;
+    g.add(lamp);
+    Stage.lamps.push(lamp);
+  });
+
+  // 交通灯
+  [[-11,-7.0,Math.PI/2],[11,-7.0,-Math.PI/2],[-11,-20.0,Math.PI/2],[11,-20.0,-Math.PI/2]].forEach(([x,z,ry]) => {
+    const src = Stage.models['kk_trafficlight_C'] || Stage.models['kk_trafficlight_B'];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToHeight(m, 4.6);
+    m.position.set(x, 0, z); m.rotation.y = ry;
+    g.add(m);
+  });
+  Stage.root.add(g);
+}
+
+function buildStore(){
+  // 门店占位（cottage 模型加载后替换）；这里先建地面装饰
+  const g = new THREE.Group();
+  // 门前广场（顾客排队区）
+  const plaza = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), new THREE.MeshStandardMaterial({ color:0x8f867a, roughness:0.95 }));
+  plaza.rotation.x = -Math.PI/2; plaza.position.set(-1.5, 0.04, 9.2); plaza.receiveShadow = true;
+  g.add(plaza);
+  // 取餐区地坪
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(13, 12), new THREE.MeshStandardMaterial({ color:0x7d7468, roughness:0.95 }));
+  apron.rotation.x = -Math.PI/2; apron.position.set(11.6, 0.05, -6.2); apron.receiveShadow = true;
+  g.add(apron);
+  // 店前台阶
+  const step = new THREE.Mesh(new THREE.BoxGeometry(13, 0.3, 1.8), new THREE.MeshStandardMaterial({ color:0xc9bfb0, roughness:0.9 }));
+  step.position.set(0, 0.15, 5.6); step.castShadow = true; step.receiveShadow = true;
+  g.add(step);
+  Stage.root.add(g);
+}
+
+function buildDeliveryPoint(){
+  const g = new THREE.Group();
+  // 麦乐送取餐区地坪
+  const pad = new THREE.Mesh(new THREE.PlaneGeometry(11, 8), new THREE.MeshStandardMaterial({ color:0x6f6a63, roughness:0.95 }));
+  pad.rotation.x = -Math.PI/2; pad.position.set(11, 0.05, -2.5); pad.receiveShadow = true;
+  g.add(pad);
+  // 麦乐送取餐点招牌
+  const sign = new THREE.Group();
+  const board = new THREE.Mesh(new THREE.BoxGeometry(4.0, 1.2, 0.18),
+    new THREE.MeshStandardMaterial({ color:0x2a6fb0, roughness:0.6 }));
+  board.position.y = 2.8; board.castShadow = true;
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 2.8, 8),
+    new THREE.MeshStandardMaterial({ color:0x4a4f56, roughness:0.7, metalness:0.3 }));
+  post.position.y = 1.4; post.castShadow = true;
+  sign.add(board, post);
+  sign.position.set(9.0, 0, -1.4);
+  sign.userData = { name:'麦乐送驿站', cat:'delivery' };
+  g.add(sign);
+  Stage.root.add(g);
+}
+
+/* ---------------- 城市街区：Kenney City Kit Industrial（CC0） ----------------
+   用工业套件搭建城市：厂房 / 仓库 / 烟囱 / 水塔 / 集装箱 / 太阳能板 / 风车。
+   每个建筑仍带 userData.cat，点击可打开对应经营面板。 */
+function buildNeighbours(){
+  // 街区布局：[模型 key, x, z, 旋转, 名称, 分类, 缩放倍数]
+  const U = SCALE.factory;
+  const blocks = [
+    // 沿街对排（门朝主路，x 方向排开）
+    ['ki_building-f', -30, 2,    0,    '中央仓库',   'shop',   1.0],
+    ['ki_building-n',  30, 2,    0,    '总部办公楼', 'office', 1.0],
+    // 二排
+    ['ki_building-l', -30, 18,   0,    '冷链物流仓', 'shop',   1.0],
+    ['ki_building-h',  30, 18,   0,    '员工宿舍',   'apt',    1.0],
+    // 三排（远景）
+    ['ki_building-r', -30, 34,   0,    '包装车间',   'shop',   1.0],
+    ['ki_building-c',  30, 34,   0,    '烘焙工坊',   'shop',   1.0],
+    // 路对面远端
+    ['ki_building-a', -50, 6,    0,    '东区厂房',   'shop',   1.0],
+    ['ki_building-t',  50, 6,    0,    '西区厂房',   'shop',   1.0],
+    ['ki_building-e', -50, 26,   0,    '旧厂改造区', 'shop',   1.0],
+    ['ki_building-g',  50, 26,   0,    '设备公司',   'shop',   1.0]
+  ];
+
+  blocks.forEach(([key, x, z, ry, name, cat]) => {
+    const src = Stage.models[key];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    // 工业模块按占地归一化，保证所有厂房体量一致
+    scaleObjectToFootprint(m, U, U);
+    placeObjectOnGround(m);
+    m.position.x = x; m.position.z = z;
+    m.rotation.y = ry;
+    m.userData = { name, cat };
+    Stage.root.add(m);
+    Stage.props.push(m);
+    (Stage.buildings = Stage.buildings || []).push(m);
+  });
+
+  // 烟囱（厂房配套，构成天际线）
+  const chimneys = [
+    ['ki_chimney-large',  -30, 40, 0],
+    ['ki_chimney-medium', -46, 42, 0],
+    ['ki_chimney-medium',  30, 42, 0]
+  ];
+  chimneys.forEach(([key, x, z, ry]) => {
+    const src = Stage.models[key];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToFootprint(m, 2.6, 2.6);
+    placeObjectOnGround(m);
+    m.position.x = x; m.position.z = z; m.rotation.y = ry;
+    Stage.root.add(m);
+    Stage.props.push(m);
+  });
+
+  // 水塔 + 风车（地标）
+  const wt = Stage.models['ki_water-tower'];
+  if (wt) {
+    const m = wt.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToHeight(m, 16.5);
+    placeObjectOnGround(m);
+    m.position.set(-40, 0, 12);
+    Stage.root.add(m);
+    Stage.props.push(m);
+  }
+  const wm = Stage.models['ki_windmill'];
+  if (wm) {
+    const m = wm.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToHeight(m, 19);
+    placeObjectOnGround(m);
+    m.position.set(40, 0, 12);
+    Stage.root.add(m);
+    Stage.props.push(m);
+  }
+
+  // 集装箱堆场（放在道路旁，增加工业密度）
+  const conts = [
+    ['ki_shipping-container-a', -13, -17.4, 0.05],
+    ['ki_shipping-container-b', -13, -14.6, 0.05],
+    ['ki_shipping-container-c',  15, -17.4, -0.05],
+    ['ki_shipping-container-b', 17.6, -16.6, 1.05],
+    ['ki_shipping-container-a', -22, -17.4, 0.05],
+    ['ki_shipping-container-a',  24, -16.4, 0.9]
+  ];
+  conts.forEach(([key, x, z, ry]) => {
+    const src = Stage.models[key];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToFootprint(m, 6.1, 2.5);
+    placeObjectOnGround(m);
+    m.position.x = x; m.position.z = z; m.rotation.y = ry;
+    Stage.root.add(m);
+    Stage.props.push(m);
+  });
+
+  // 屋顶太阳能板（摆在部分厂房屋顶）
+  const panels = [
+    ['ki_solar-panel-landscape', -22, 6,  -0.6, 0.35],
+    ['ki_solar-panel-landscape', -18, 6,  -0.6, 0.35],
+    ['ki_solar-panel-landscape',  22, 6,   0.6, 0.35],
+    ['ki_solar-panel-landscape',  18, 6,   0.6, 0.35],
+    ['ki_solar-panel-flat',     -22, 10, -0.6, 0.3]
+  ];
+  panels.forEach(([key, x, z, ry, y]) => {
+    const src = Stage.models[key];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToFootprint(m, 4.0, 3.2);
+    placeObjectOnGround(m);
+    m.position.x = x; m.position.z = z; m.position.y = y;
+    m.rotation.y = ry;
+    Stage.root.add(m);
+    Stage.props.push(m);
+  });
+
+  // 储罐
+  const tanks = [['ki_detail-tank', -38, 30], ['ki_detail-tank-large', 38, 30]];
+  tanks.forEach(([key, x, z]) => {
+    const src = Stage.models[key];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToFootprint(m, 3.4, 3.4);
+    placeObjectOnGround(m);
+    m.position.x = x; m.position.z = z;
+    Stage.root.add(m);
+    Stage.props.push(m);
+  });
+
+  // 工作台甜品小屋（保留原工作台 3D 温馨小屋素材）
+  const ct = Stage.models['cottage'];
+  if (ct) {
+    const m = window.__SkeletonUtils__.clone(ct);
+    m.visible = true;
+    m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    const box = new THREE.Box3().setFromObject(m);
+    const sz = box.getSize(new THREE.Vector3());
+    const k = 6.4 / Math.max(0.01, Math.max(sz.x, sz.z));
+    m.scale.setScalar(k);
+    m.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(m);
+    m.position.y = -b2.min.y;
+    m.position.x = 13.5; m.position.z = 20.5;
+    m.rotation.y = -0.5;
+    m.userData = { name:'甜品小屋', cat:'shop' };
+    Stage.root.add(m);
+    Stage.props.push(m);
+    (Stage.buildings = Stage.buildings || []).push(m);
+  }
+}
+
+/* ---------------- 街景道具（GLB 放置表） ---------------- */
+const PROP_SPOTS = [
+  // Kenney 自然绿化（按 5.2m 行道树归一化）
+  { key:'k_tree_oak',        x:-9.5, z:6.4,  h:5.6, ry:0.4 },
+  { key:'k_tree_oak',        x:-7.0, z:6.0,  h:4.8, ry:1.2 },
+  { key:'k_tree_pineRoundB', x:7.2,  z:6.6,  h:5.4, ry:2.1 },
+  { key:'k_tree_fat',        x:22,   z:4.6,  h:6.0, ry:0.8 },
+  { key:'k_tree_pineRoundB', x:25,   z:6.0,  h:4.6, ry:1.6 },
+  { key:'k_tree_oak',        x:-13,  z:12.5, h:5.2, ry:2.6 },
+  { key:'k_tree_fat',        x:-20,  z:13,   h:5.6, ry:0.9 },
+  { key:'k_tree_pineRoundB', x:19,   z:13,   h:5.0, ry:2.3 },
+  { key:'k_tree_oak',        x:-19,  z:-9.0, h:5.4, ry:1.1 },
+  { key:'k_tree_fat',        x:20,   z:-9.0, h:5.2, ry:0.3 },
+  { key:'k_grass_large',     x:-3.0, z:11.0, h:0.6, ry:0.3 },
+  { key:'k_grass_large',     x:3.4,  z:11.0, h:0.55,ry:1.2 },
+  { key:'k_grass_large',     x:-6.2, z:10.6, h:0.5, ry:2.1 },
+  { key:'k_grass_large',     x:7.4,  z:10.6, h:0.55,ry:0.7 },
+  { key:'k_flower_redA',     x:4.2,  z:11.8, h:0.7, ry:0.5 },
+  { key:'k_flower_yellowA',  x:4.8,  z:12.0, h:0.7, ry:1.2 },
+  { key:'k_flower_redA',     x:-4.0, z:11.9, h:0.7, ry:0.9 },
+  { key:'k_mushroom_red',    x:-5.6, z:-8.2, h:0.4, ry:0.3 },
+  { key:'k_plant_flatTall',  x:7.6,  z:11.4, h:1.1, ry:0.4 },
+  { key:'k_stone_largeA',    x:-8.4, z:-8.4, h:0.9, ry:0.5 },
+  { key:'k_rock_largeA',     x:10.4, z:-8.6, h:1.0, ry:0.9 },
+  // KayKit 城市街具（按真实尺寸归一化）
+  { key:'kk_bench',          x:-6.4, z:9.0,  h:0.85, ry:Math.PI },
+  { key:'kk_bench',          x:6.0,  z:9.0,  h:0.85, ry:Math.PI },
+  { key:'kk_bench',          x:-11,  z:-6.6, h:0.85, ry:0 },
+  { key:'kk_bench',          x:12,   z:-6.6, h:0.85, ry:0 },
+  { key:'kk_trash_A',        x:-3.2, z:9.4,  h:1.1, ry:0.4 },
+  { key:'kk_trash_A',        x:3.2,  z:9.4,  h:1.1, ry:1.1 },
+  { key:'kk_trash_B',        x:-9,   z:-6.4, h:1.1, ry:0.2 },
+  { key:'kk_firehydrant',    x:-6.2, z:-6.2, h:0.8, ry:0.5 },
+  { key:'kk_firehydrant',    x:6.2,  z:-6.2, h:0.8, ry:1.8 },
+  { key:'kk_firehydrant',    x:16,   z:-6.2, h:0.8, ry:0.2 },
+  { key:'kk_bush',           x:-7.2, z:7.6,  h:1.2, ry:0.3 },
+  { key:'kk_bush',           x:7.2,  z:7.6,  h:1.2, ry:1.4 },
+  { key:'kk_bush',           x:-12,  z:7.2,  h:1.2, ry:2.0 },
+  { key:'kk_bush',           x:12,   z:7.2,  h:1.2, ry:0.8 },
+  { key:'kk_box_A',          x:8.6,  z:6.2,  h:0.9, ry:0.4 },
+  { key:'kk_box_B',          x:9.4,  z:5.6,  h:0.9, ry:1.2 }
+];
+
+function buildProps(){
+  // 占位，等 GLB 加载完再实例化
+  Stage.propSpots = PROP_SPOTS;
+}
+
+/* 绿化材质：Kenney 原色偏青，改为自然绿 / 暖土色 */
+function tintNature(obj){
+  obj.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach(m => {
+      if (!m || !m.color) return;
+      const n = (m.name||'').toLowerCase();
+      if (n.includes('leaf')) m.color.setHex(0x4f7a3a);
+      else if (n.includes('bark') || n.includes('wood')) m.color.setHex(0x6b4f33);
+      else if (n.includes('grass')) m.color.setHex(0x5c8a45);
+    });
+  });
+}
+
+function placePropsFromModels(){
+  (Stage.propSpots||[]).forEach(spot => {
+    const src = Stage.models[spot.key];
+    if (!src) return;
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    if (spot.key.startsWith('k_')) tintNature(m);
+    m.position.set(spot.x, 0, spot.z);
+    m.rotation.y = spot.ry || 0;
+    // 按真实高度归一化（树木 5m 级、街具 0.8~1.2m 级）
+    if (spot.h) scaleObjectToHeight(m, spot.h);
+    // 沉到地面
+    const box = new THREE.Box3().setFromObject(m);
+    m.position.y = -box.min.y;
+    Stage.root.add(m);
+    Stage.props.push(m);
+  });
+}
+
+/* ---------------- 动态对象：顾客 / 店员 / 骑手 / 车 ---------------- */
+/* 角色动画缓存：modelName -> {scene, clips} */
+function getCharacterSource(modelKey){
+  const src = Stage.models[modelKey];
+  if (!src) return null;
+  if (!src.userData._clips) {
+    // 首次使用时记录动画剪辑
+    src.userData._clips = src.userData.animations || [];
+  }
+  return src;
+}
+
+/* Kenney Mini Characters 动画名映射：老模型用 Idle/Run，新模型用 idle/walk */
+const CLIP_ALIAS = {
+  idle:  ['idle','Idle','Greeting','static'],
+  walk:  ['walk','Walk','Run','run'],
+  run:   ['sprint','Run','run','walk'],
+  pick:  ['pick-up','Pick','pick'],
+  hold:  ['holding-both','holding-right','holding-left','hold'],
+  drive: ['drive','Drive','sit','Sit'],
+  sit:   ['sit','Sit']
+};
+
+function findClip(clips, names){
+  for (const n of names) {
+    const c = clips.find(x => x.name === n || x.name.startsWith(n));
+    if (c) return c;
+  }
+  return null;
+}
+
+function makeActor(kind, modelKey, color){
+  // Kenney Mini Characters（CC0）：统一按 SCALE.person 归一化到真实身高
+  const src = getCharacterSource(modelKey);
+  const grp = new THREE.Group();
+
+  if (src) {
+    // SkeletonUtils.clone 正确重绑骨骼
+    const body = window.__SkeletonUtils__.clone(src);
+    body.visible = true;
+    body.userData.__isCharacter = true;
+    body.traverse(o => {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    });
+    // 按真实包围盒缩放到 1.70m 身高（不再用固定倍数，避免比例漂移）
+    scaleObjectToHeight(body, SCALE.person);
+    body.updateMatrixWorld(true);
+    const box2 = new THREE.Box3().setFromObject(body);
+    body.position.y = -box2.min.y;
+    grp.add(body);
+    grp.userData.body = body;
+
+    // 动画混合器
+    const clips = src.userData._clips || [];
+    if (clips.length) {
+      const mixer = new THREE.AnimationMixer(body);
+      const idleClip = findClip(clips, CLIP_ALIAS.idle)  || clips[0];
+      const walkClip = findClip(clips, CLIP_ALIAS.walk)  || idleClip;
+      const runClip  = findClip(clips, CLIP_ALIAS.run)   || walkClip;
+      const pickClip = findClip(clips, CLIP_ALIAS.pick);
+      const holdClip = findClip(clips, CLIP_ALIAS.hold);
+      const action = mixer.clipAction(idleClip);
+      action.play();
+      grp.userData.mixer = mixer;
+      grp.userData.clips = { idle:idleClip, walk:walkClip, run:runClip, pick:pickClip, hold:holdClip };
+      grp.userData.currentAction = action;
+    }
+  } else {
+    // 兜底：程序化小人（模型未加载时），同样按 1.70m 比例
+    const skin = new THREE.MeshStandardMaterial({ color:0xf0c9a4, roughness:0.85 });
+    const cloth = new THREE.MeshStandardMaterial({ color, roughness:0.8 });
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.44, 4, 10), cloth);
+    torso.position.y = 1.02; torso.castShadow = true;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 12), skin);
+    head.position.y = 1.52; head.castShadow = true;
+    grp.add(torso, head);
+    grp.userData.body = torso;
+  }
+
+  // 渠道标识点（绿=堂食 / 蓝=外卖 / 黄=骑手）
+  const haloColors = { dine:0x4ec26a, deliver:0x38bdf8, rider:0xffbc1f, staff:0xffbc1f };
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8),
+    new THREE.MeshBasicMaterial({ color: haloColors[kind] || 0x4ec26a }));
+  halo.position.y = 1.95;
+  grp.add(halo);
+  grp.userData.halo = halo;
+  grp.userData.kind = kind;
+  grp.userData.modelKey = modelKey;
+
+  Stage.scene.add(grp);
+  Stage.actors.push(grp);
+  return grp;
+}
+
+function scaleObjectToLength(obj, targetLength){
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const length = Math.max(size.x, size.z);
+  if (length > 0.001) obj.scale.multiplyScalar(targetLength / length);
+  obj.updateMatrixWorld(true);
+}
+
+/* 按包围盒高度归一化到目标米数（用于人物、树木、路灯等） */
+function scaleObjectToHeight(obj, targetHeight){
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  const h = box.getSize(new THREE.Vector3()).y;
+  if (h > 0.001) obj.scale.multiplyScalar(targetHeight / h);
+  obj.updateMatrixWorld(true);
+}
+
+/* 归一化到目标「平面占位」（用于厂房、集装箱等按占地控制的物体） */
+function scaleObjectToFootprint(obj, targetW, targetD){
+  obj.updateMatrixWorld(true);
+  const size = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
+  const k = Math.min(targetW / Math.max(size.x, 0.01), targetD / Math.max(size.z, 0.01));
+  if (k > 0) obj.scale.multiplyScalar(k);
+  obj.updateMatrixWorld(true);
+}
+
+function placeObjectOnGround(obj){
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  obj.position.y -= box.min.y;
+}
+
+function makeVehicle(kind){
+  // KayKit 车辆按真实包围盒归一化，避免固定倍数造成比例漂移
+  const carKeys = ['kk_car_sedan','kk_car_taxi','kk_car_hatchback','kk_car_stationwagon','kk_car_police'];
+  const key = carKeys[Math.floor(Math.random()*carKeys.length)];
+  const src = Stage.models[key];
+  const grp = new THREE.Group();
+  if (src) {
+    const m = src.clone(true);
+    fixCharMaterials(m);
+    scaleObjectToLength(m, SCALE.car);
+    placeObjectOnGround(m);
+    grp.add(m);
+  } else {
+    // 兜底：程序化车，尺寸与 KayKit 车一致
+    const col = [0xd94f4f,0x4f7fd9,0xe0a53a,0x5aa86a,0xc9c9c9][Math.floor(Math.random()*5)];
+    const mat = new THREE.MeshStandardMaterial({ color:col, roughness:0.55, metalness:0.15 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.55, 0.62, 1.25), mat);
+    body.position.y = 0.42; body.castShadow = true;
+    grp.add(body);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.5, 1.12), new THREE.MeshStandardMaterial({ color:0x2b3340, roughness:0.4, metalness:0.3 }));
+    cab.position.set(0.1, 0.95, 0); cab.castShadow = true;
+    grp.add(cab);
+    const wheelMat = new THREE.MeshStandardMaterial({ color:0x14161a, roughness:0.9 });
+    [[-0.85,0.66],[0.85,0.66]].forEach(pt=>{
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.28,0.18,12), wheelMat);
+      w.rotation.x = Math.PI/2; w.position.set(pt[0], 0.28, 0.66); w.castShadow = true;
+      grp.add(w);
+      const w2 = w.clone(); w2.position.z = -0.66; grp.add(w2);
+    });
+  }
+  grp.userData.kind = kind;
+  Stage.scene.add(grp);
+  return grp;
+}
+
+function makeDeliveryBike(){
+  const grp = new THREE.Group();
+  const src = Stage.models.delivery_bike;
+  if (src) {
+    const bike = src.clone(true);
+    fixCharMaterials(bike);
+    scaleObjectToLength(bike, SCALE.bike);
+    placeObjectOnGround(bike);
+    grp.add(bike);
+    grp.userData.bike = bike;
+  } else {
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.15,0.1,0.16), new THREE.MeshStandardMaterial({color:0xd0342c,roughness:0.5}));
+    frame.position.y=0.52;
+    const wheelMat = new THREE.MeshStandardMaterial({color:0x17191d,roughness:0.9});
+    [-0.66,0.66].forEach(z=>{ const w=new THREE.Mesh(new THREE.TorusGeometry(0.34,0.07,8,16),wheelMat); w.rotation.y=Math.PI/2; w.position.set(0,0.38,z); grp.add(w); });
+    grp.add(frame);
+  }
+  grp.userData.kind='delivery-bike';
+  Stage.scene.add(grp);
+  return grp;
+}
+
+function rebuildTrafficVehicles(){
+  Stage.vehicles.forEach(v=>Stage.scene.remove(v));
+  Stage.vehicles=[];
+  for (let i=0;i<10;i++){
+    const v=makeVehicle('car');
+    // 两条车道：近端 -11.8（向 +x）/ 远端 -15.2（向 -x）
+    v.userData={t:i/10,lane:(i%2?-15.2:-11.8),speed:0.014+Math.random()*0.010};
+    Stage.vehicles.push(v);
+  }
+}
+
+/* ---------------- 相机交互（拖拽旋转 / 滚轮缩放） ---------------- */
+function bindStageControls(){
+  const canvas = document.getElementById('stage');
+  let dragging=false, lx=0, ly=0, moved=0;
+  canvas.addEventListener('pointerdown', e => {
+    dragging=true; moved=0; lx=e.clientX; ly=e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX-lx, dy = e.clientY-ly;
+    lx=e.clientX; ly=e.clientY; moved += Math.abs(dx)+Math.abs(dy);
+    Stage.camTheta -= dx*0.006;
+    Stage.camPhi = Math.max(0.12, Math.min(1.32, Stage.camPhi - dy*0.005));
+  });
+  canvas.addEventListener('pointerup', e => {
+    dragging=false;
+    if (moved < 6) pickBuilding(e);
+  });
+  canvas.addEventListener('pointercancel', () => { dragging=false; });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    Stage.camDist = Math.max(12, Math.min(90, Stage.camDist + e.deltaY*0.05));
+  }, { passive:false });
+}
+
+function pickBuilding(e){
+  const rect = document.getElementById('stage').getBoundingClientRect();
+  Stage.mouse.x = ((e.clientX-rect.left)/rect.width)*2 - 1;
+  Stage.mouse.y = -((e.clientY-rect.top)/rect.height)*2 + 1;
+  Stage.raycaster.setFromCamera(Stage.mouse, Stage.camera);
+  const hits = Stage.raycaster.intersectObjects(Stage.root.children, true);
+  for (const h of hits) {
+    let o = h.object;
+    while (o && !o.userData.cat) o = o.parent;
+    if (o && o.userData.cat) { onBuildingClick(o.userData); return; }
+  }
+}
+
+function onBuildingClick(info){
+  if (info.cat === 'store'){ switchTab('op'); toast('这是你的麦当劳门店 — 右侧为经营总览'); }
+  else if (info.cat === 'delivery'){ switchTab('order'); toast('麦乐送驿站 — 右侧为订单看板'); }
+  else if (info.cat === 'shop'){ switchTab('supply'); toast('便利店 — 右侧为供应链'); }
+  else if (info.cat === 'office'){ switchTab('staff'); toast('写字楼 — 右侧为人力排班'); }
+  else toast(info.name + '：非本店经营范围');
+}
+
+function resizeStage(){
+  if (!Stage.renderer) return;
+  const canvas = document.getElementById('stage');
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  Stage.renderer.setSize(w, h, false);
+  Stage.camera.aspect = w/h;
+  Stage.camera.updateProjectionMatrix();
+}
+
+function updateCamera(){
+  const d = Stage.camDist, th = Stage.camTheta, ph = Stage.camPhi;
+  const x = Stage.camTarget.x + d*Math.sin(ph)*Math.sin(th);
+  const y = Stage.camTarget.y + d*Math.cos(ph);
+  const z = Stage.camTarget.z + d*Math.sin(ph)*Math.cos(th);
+  Stage.camera.position.set(x,y,z);
+  Stage.camera.lookAt(Stage.camTarget);
+}
+
+/* ---------------- 每帧更新场景 ---------------- */
+function updateStage(dt){
+  if (!Stage.renderer) return;
+  // 动态 actor 与经营状态联动
+  syncActors(dt);
+  // 角色动画
+  Stage.actors.forEach(a => { if (a.userData.mixer) a.userData.mixer.update(dt); });
+  updateCamera();
+  Stage.renderer.render(Stage.scene, Stage.camera);
+}
+
+function syncActors(dt){
+  // 顾客：按订单状态摆位
+  const dineOrders = S.orders.filter(o=>!o.isDeliver).slice(0,10);
+  const deliOrders = S.orders.filter(o=>o.isDeliver).slice(0,10);
+
+  // 顾客池：Kenney Mini Characters 男/女角色交替
+  ensureActors('dine', dineOrders.length, null, 0xe04a3a);
+  ensureActors('deliver', deliOrders.length, null, 0x38bdf8);
+  // 店员：柜台后固定岗位（参考图：店员在柜台内操作/递袋）
+  ensureActors('staff', Math.max(1, S.staff.counter), null, 0xffbc1f);
+
+  // 堂食顾客：店门口排队（间距按 1.7m 身高的人物尺寸）
+  let di=0;
+  dineOrders.forEach(o => {
+    const a = Stage.actorPool.dine[di++];
+    if (!a) return;
+    const idx = di-1;
+    const col = idx % 3, row = Math.floor(idx/3);
+    const target = new THREE.Vector3(-4.4 + col*1.5, 0, 8.2 + row*1.5);
+    const dist = a.position.distanceTo(target);
+    a.position.lerp(target, Math.min(1, dt*2.0));
+    a.rotation.y = Math.PI;
+    setAnimState(a, dist > 0.3 ? 'walk' : 'idle');
+  });
+
+  // 外卖顾客：麦乐送取餐区等候（分两列，与骑手停车区分开）
+  let li=0;
+  deliOrders.forEach(o => {
+    const a = Stage.actorPool.deliver[li++];
+    if (!a) return;
+    const idx = li-1;
+    const col = idx % 2, row = Math.floor(idx/2);
+    const target = new THREE.Vector3(10.2 + col*1.5, 0, -3.4 - row*1.5);
+    const dist = a.position.distanceTo(target);
+    a.position.lerp(target, Math.min(1, dt*2.0));
+    a.rotation.y = Math.PI;
+    setAnimState(a, dist > 0.3 ? 'walk' : 'idle');
+  });
+
+  // 店员：站在点餐柜台内侧（朝向顾客），偶尔做取餐动作
+  const counterStaff = Stage.actorPool.staff || [];
+  counterStaff.forEach((a,i) => {
+    if (!a) return;
+    a.position.set(-3.2 + i*1.55, 0, 0.7);
+    a.rotation.y = 0;
+    // 忙时双手捧纸袋递餐（holding-both），否则待机
+    const busy = S.orders.some(o => o.state==='ready' || o.state==='cooking');
+    setAnimState(a, busy ? 'hold' : 'idle');
+    decorateStaff(a, busy);
+  });
+
+  // 车辆：路上行驶（车行道 z=-13.5，双向车道）
+  Stage.vehicles.forEach(v => {
+    const u = v.userData;
+    u.t += dt * u.speed;
+    if (u.t > 1) u.t -= 1;
+    const lane = u.lane;
+    const x = -90 + u.t*180;
+    v.position.set(x, 0, lane);
+    v.rotation.y = lane > -13.5 ? Math.PI/2 : -Math.PI/2;
+  });
+
+  // 骑手：Mini Characters 人物 + 头盔/保温箱 + Kenney 配送摩托车
+  while ((Stage.riderVehicles || []).length < S.riders.length) Stage.riderVehicles.push(makeDeliveryBike());
+  while ((Stage.riderVehicles || []).length > S.riders.length) Stage.scene.remove(Stage.riderVehicles.pop());
+  ensureActors('rider', S.riders.length, null, 0xffbc1f);
+  S.riders.forEach((r,i) => {
+    const a = Stage.actorPool.rider[i];
+    const bike = Stage.riderVehicles?.[i];
+    if (!a) return;
+    const state = r.state || 'idle';
+    if (state === 'idle') {
+      // 空闲时在取餐区外侧列队等候，摩托车停在身侧
+      const wx = 13.2 + i * 1.5, wz = -8.4;
+      a.position.set(wx, 0, wz);
+      a.rotation.y = 0;
+      setAnimState(a, 'idle');
+      decorateRider(a);
+      if (bike) {
+        bike.visible = true;
+        bike.position.set(wx + 1.1, 0, wz + 0.2);
+        bike.rotation.y = 0;
+      }
+      return;
+    }
+    const phase = (S.minute*0.006 + i*0.29) % 1;
+    let t = state === 'picking' ? phase*0.38 : state === 'delivering' ? 0.38 + phase*0.54 : 0.92 - phase*0.18;
+    t = Math.max(0.04, Math.min(0.96, t));
+    const x = -2.0 + t*26.0;
+    const z = -8.2 - Math.sin(t*Math.PI)*1.6;
+    const yaw = state === 'returning' ? -Math.PI/2 : Math.PI/2;
+    // 骑行时抬高角色到摩托车座位，并用 drive（坐姿）动画
+    a.position.set(x, 0.42, z);
+    a.rotation.y = yaw;
+    setAnimState(a, 'drive');
+    decorateRider(a);
+    if (bike) {
+      bike.visible = true;
+      bike.position.set(x, 0, z);
+      bike.rotation.y = yaw;
+    }
+  });
+
+  // 门店吉祥物：魔女站在门口迎客
+  if (Stage.mascot && Stage.storeModel) {
+    Stage.mascot.position.set(-7.2, 0, 6.2);
+    Stage.mascot.rotation.y = Math.PI * 0.85;
+    setAnimState(Stage.mascot, 'idle');
+  }
+
+  // 街区动物（猫/羊驼/狗）漫步
+  (Stage.animals||[]).forEach((an,i) => {
+    const u = an.userData;
+    if (!u._t) u._t = i * 2.1;
+    u._t += dt * 0.3;
+    const cx = u.cx || an.position.x, cz = u.cz || an.position.z;
+    an.position.x = cx + Math.sin(u._t * 0.4 + i) * 1.2;
+    an.position.z = cz + Math.cos(u._t * 0.3 + i*1.7) * 0.8;
+    an.rotation.y = Math.atan2(Math.cos(u._t*0.4+i), -Math.sin(u._t*0.3+i*1.7));
+  });
+}
+
+/* 切换角色动画状态（idle / walk / run / pick / hold / drive） */
+function setAnimState(a, state){
+  const ud = a.userData;
+  if (!ud.mixer || !ud.clips) return;
+  if (ud._animState === state) return;
+  ud._animState = state;
+  const c = ud.clips;
+  const clip = state === 'run'  ? (c.run  || c.walk || c.idle)
+             : state === 'walk' ? (c.walk || c.run  || c.idle)
+             : state === 'pick' ? (c.pick || c.hold || c.idle)
+             : state === 'hold' ? (c.hold || c.pick || c.idle)
+             : state === 'drive' ? (c.drive|| c.idle)
+             : c.idle;
+  if (!clip) return;
+  if (ud.currentAction) ud.currentAction.fadeOut(0.2);
+  const next = ud.mixer.clipAction(clip);
+  next.reset().fadeIn(0.2).play();
+  ud.currentAction = next;
+}
+
+/* 麦当劳店员制服（参考图 #2：白色衬衫 + 黑色领带 + 红围裙 + 鸭舌帽 + 手持纸袋） */
+function decorateStaff(actor, withBag){
+  if (actor.userData._staffGear) {
+    // 已建过装备：只切换纸袋显隐
+    if (actor.userData._staffGear.bag) actor.userData._staffGear.bag.visible = !!withBag;
+    return;
+  }
+  const tie   = new THREE.MeshStandardMaterial({ color:0x1d1d22, roughness:0.6 });
+  const apron = new THREE.MeshStandardMaterial({ color:0xd0342c, roughness:0.78 });
+  const cap   = new THREE.MeshStandardMaterial({ color:0xd0342c, roughness:0.72 });
+
+  // 黑色领带（胸口正中；实测身体前表面 z≈0.30，torso 关节 y=0.386）
+  const tieMesh = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.03), tie);
+  tieMesh.position.set(0, 0.62, 0.36);
+  // 红色围裙（腰腹前侧）
+  const apronMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.42, 0.08), apron);
+  apronMesh.position.set(0, 0.50, 0.40);
+  apronMesh.castShadow = true;
+  // 红色鸭舌帽（压扁的半球 + 帽檐，适配 chibi 大头）
+  const hat = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 10, 0, Math.PI*2, 0, Math.PI*0.5), cap);
+  hat.position.set(0, 1.26, 0.20); hat.scale.y = 0.72; hat.castShadow = true;
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.03, 16, 1, false, 0, Math.PI), cap);
+  brim.position.set(0, 1.28, 0.44);
+  brim.castShadow = true;
+  // 名牌
+  const badge = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.06, 0.02),
+    new THREE.MeshStandardMaterial({ color:0xffbc1f, roughness:0.5, metalness:0.2 }));
+  badge.position.set(0.16, 0.64, 0.38);
+
+  // 手持纸袋（参考图 #2 顾客手中的 CHECK OUT 纸袋）
+  const bagTex = makeSignTexture(256, 256, (ctx,w,h) => {
+    ctx.fillStyle = '#c9a06a'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = '#8a6234'; ctx.fillRect(0,0,w,26);
+    ctx.fillStyle = '#d0342c'; ctx.font = '700 44px Arial'; ctx.textAlign='center';
+    ctx.fillText('McD', w/2, 132);
+    ctx.fillStyle = '#5a3d1e'; ctx.font = '700 20px Arial';
+    ctx.fillText('CHECK OUT', w/2, 168);
+    ctx.strokeStyle = '#8a6234'; ctx.lineWidth = 3; ctx.strokeRect(14, 186, w-28, 50);
+    ctx.fillStyle = '#5a3d1e'; ctx.font = '16px Arial';
+    ctx.fillText('THANK YOU', w/2, 216);
+  });
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 0.18),
+    new THREE.MeshStandardMaterial({ map:bagTex, roughness:0.9 }));
+  bag.position.set(0, 0.52, 0.56);
+  bag.castShadow = true;
+  bag.visible = !!withBag;
+
+  actor.add(tieMesh, apronMesh, hat, brim, badge, bag);
+  actor.userData._staffGear = { tieMesh, apronMesh, hat, brim, badge, bag };
+}
+
+function decorateRider(actor){
+  if (actor.userData._riderGear) return;
+  // 头盔（大头造型需要更宽的帽体）
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.46, 16, 10, 0, Math.PI*2, 0, Math.PI*0.52), new THREE.MeshStandardMaterial({color:0xffbc1f,roughness:0.48,metalness:0.15}));
+  helmet.position.set(0, 1.30, 0.04);
+  helmet.castShadow = true;
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.12, 0.06), new THREE.MeshStandardMaterial({color:0x2b3138,roughness:0.35,metalness:0.4}));
+  visor.position.set(0, 1.22, 0.46);
+  // 外卖保温箱（背在身后；身体后表面 z≈-0.36）
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.46,0.38,0.32), new THREE.MeshStandardMaterial({color:0xd0342c,roughness:0.58}));
+  box.position.set(0, 0.58, -0.46);
+  box.castShadow = true;
+  const boxLid = new THREE.Mesh(new THREE.BoxGeometry(0.48,0.06,0.34), new THREE.MeshStandardMaterial({color:0x2b3138,roughness:0.55}));
+  boxLid.position.set(0, 0.78, -0.46);
+  // 反光背心肩带
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.05,0.02), new THREE.MeshStandardMaterial({color:0xf0f0f0,roughness:0.4,emissive:0x333333,emissiveIntensity:0.4}));
+  strap.position.set(0, 0.72, 0.32);
+  actor.add(helmet, visor, box, boxLid, strap);
+  actor.userData._riderGear = { helmet, visor, box, boxLid, strap };
+}
+
+function resetDynamicActors(){
+  const pools = Stage.actorPool || {};
+  Object.keys(pools).forEach(kind => {
+    (pools[kind] || []).forEach(a => {
+      if (a.userData.mixer) a.userData.mixer.stopAllAction();
+      Stage.scene.remove(a);
+      const idx = Stage.actors.indexOf(a);
+      if (idx >= 0) Stage.actors.splice(idx, 1);
+    });
+  });
+  Stage.actorPool = { dine: [], deliver: [], rider: [], staff: [] };
+}
+
+function ensureActors(kind, count, modelKey, color){
+  Stage.actorPool = Stage.actorPool || { dine:[], deliver:[], rider:[], staff:[] };
+  if (!Stage.actorPool[kind]) Stage.actorPool[kind] = [];
+  const pool = Stage.actorPool[kind];
+  // Kenney Mini Characters 角色池：男/女交替，店员优先用女性角色（参考图 #2）
+  const miniModels = [
+    'km_male_a','km_male_b','km_female_a','km_female_b',
+    'km_male_c','km_female_c','km_male_d','km_female_d'
+  ];
+  const staffModels = ['km_female_a','km_female_b','km_female_c','km_female_d'];
+  const riderModels  = ['km_male_b','km_male_c','km_male_d','km_male_a'];
+  while (pool.length < count) {
+    let key = modelKey;
+    if (!key) {
+      if (kind === 'staff') key = staffModels[pool.length % staffModels.length];
+      else if (kind === 'rider') key = riderModels[pool.length % riderModels.length];
+      else key = miniModels[pool.length % miniModels.length];
+    }
+    pool.push(makeActor(kind, key, color));
+  }
+  while (pool.length > count) {
+    const a = pool.pop();
+    if (a.userData.mixer) a.userData.mixer.stopAllAction();
+    Stage.scene.remove(a);
+    Stage.actors.splice(Stage.actors.indexOf(a),1);
+  }
+  pool.forEach((a,i) => { a.visible = i < count; });
+}
+
+/* ---------------- 昼夜光照（Sky 太阳 + 路灯联动） ---------------- */
+function applyDayLight(){
+  const night = S.minute < 5*60+30 || S.minute > 19*60+30;
+  const dawn  = S.minute >= 5*60+30 && S.minute < 9*60;
+  const dusk  = S.minute >= 17*60 && S.minute < 19*60+30;
+
+  // Sky 太阳角度：把游戏 6:00-20:00 映射到太阳东升西落
+  if (Stage.sky) {
+    const t = Math.max(0, Math.min(1, (S.minute - 5*60) / (15*60)));   // 0=日出 1=日落
+    const elev = Math.sin(t * Math.PI) * 52;                            // 最高 52°
+    const azim = 90 + t * 180;                                          // 东 → 西
+    const phi = THREE.MathUtils.degToRad(90 - elev);
+    const theta = THREE.MathUtils.degToRad(azim);
+    const sunPos = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+    const u = Stage.sky.material.uniforms;
+    u.sunPosition.value.copy(sunPos);
+    // 太阳位置同步给平行光，阴影方向一致
+    if (Stage.sun) Stage.sun.position.copy(sunPos).multiplyScalar(38);
+    // 清晨/黄昏调大气散射
+    u.rayleigh.value = night ? 0.4 : (dawn||dusk ? 2.4 : 1.6);
+    u.turbidity.value = (dawn||dusk) ? 9 : 6;
+  }
+
+  let bg, sunColor, sunI, hemiI, fogFar;
+  if (night){ bg=0x0a1020; sunColor=0x93b4ff; sunI=0.28; hemiI=0.34; fogFar=120; }
+  else if (dawn){ bg=0x8a6a68; sunColor=0xffc98a; sunI=1.15; hemiI=0.66; fogFar=185; }
+  else if (dusk){ bg=0x8a5a48; sunColor=0xff9d5c; sunI=1.2; hemiI=0.62; fogFar=180; }
+  else { bg=0x8fc0e4; sunColor=0xffe6b8; sunI=1.6; hemiI=0.95; fogFar=230; }
+  Stage.scene.background.setHex(bg);
+  Stage.scene.fog.color.setHex(bg);
+  Stage.scene.fog.far = fogFar;
+  Stage.sun.color.setHex(sunColor);
+  Stage.sun.intensity = sunI;
+  Stage.scene.children.forEach(c => { if (c.isHemisphereLight) c.intensity = hemiI; });
+
+  // 夜间路灯点亮
+  const lampI = night ? 1.8 : (dusk ? 1.0 : 0);
+  (Stage.lamps||[]).forEach(l => { if (l.userData.light) l.userData.light.intensity = lampI; });
+}
+
+/* ---------------- 经营模拟主循环（每个 tick 推进 0.25 分钟） ---------------- */
+function simTick(){
+  // 非营业时段
+  if(!inHour()){
+    if(S.minute >= 23*60){ endDay(); }
+    return;
+  }
+  // 生成新订单
+  const rate = arrivalRate();
+  S._acc = (S._acc || 0) + rate*0.25;
+  while(S._acc >= 1){ S._acc -= 1; spawnOrder(); }
+  // 队列统计
+  S.counters.dine = S.orders.filter(o=>!o.isDeliver && (o.state==='queued'||o.state==='cooking')).length;
+  S.counters.deliver = S.orders.filter(o=>o.isDeliver && (o.state==='queued'||o.state==='cooking'||o.state==='ready'||o.state==='packing')).length;
+  updateOrders(0.25);
+  updateStock(0.25);
+  // 骑手对象维护
+  while(S.riders.length < S.staff.rider){ S.riders.push({id:'r'+S.riders.length, state:'idle', x:-2.6, y:1.6, orderId:null, pickAt:0, backAt:0}); }
+  while(S.riders.length > S.staff.rider) S.riders.pop();
+  // 广告投放计时
+  if(S.adCampaign > 0){
+    S.adCampaign -= 0.25;
+    if(S.adCampaign <= 0){ S.adCampaign = 0; logEvent('广告投放结束','y'); }
+  }
+  // 时间推进 + 每小时结算
+  const prevH = hour();
+  S.minute += 0.25;
+  if(hour() !== prevH){
+    const st = S.stats;
+    const hi = prevH - 6;
+    if(hi >= 0 && hi < 17){
+      st.hourly.revenue[hi] = Math.round(st.revenue - (st._revBase || 0));
+      st.hourly.orders[hi]  = Math.round(st.served   - (st._ordBase  || 0));
+      st.hourly.dine[hi]    = Math.round(st.dine     - (st._dineBase || 0));
+      st.hourly.deliver[hi] = Math.round(st.deliver  - (st._deliverBase || 0));
+    }
+    st._revBase = st.revenue; st._ordBase = st.served;
+    st._dineBase = st.dine;   st._deliverBase = st.deliver;
+    logEvent(hhmm(prevH*60)+' 时段结算 · 在手订单 '+S.orders.length, '');
+  }
+  if(S.minute >= 23*60){ S.minute = 23*60; endDay(); }
+}
+
+/* ================================================================ 看板渲染 */
+function switchTab(t){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===t));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on', p.id==='p-'+t));
+  // 切换后强制重建该面板结构（保证数据形态最新），随后正常节流刷新
+  if(PANEL_SIG) delete PANEL_SIG[t];
+  renderPanels();
+}
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.t)));
+document.querySelectorAll('#speedBtns button').forEach(b=>b.addEventListener('click',()=>{
+  speed=parseInt(b.dataset.s);
+  document.querySelectorAll('#speedBtns button').forEach(x=>x.classList.toggle('on',x===b));
+  running = speed>0;
+}));
+
+function updateHud(){
+  document.getElementById('clock').textContent=fmtTime(S.minute);
+  document.getElementById('dayLabel').textContent=dayLabel();
+  const w=weatherObj();
+  document.getElementById('weatherLb').textContent=w.name;
+  document.getElementById('weatherTip').textContent=w.tip;
+  document.getElementById('cashLb').textContent=money(S.cash);
+  document.getElementById('cashTip').textContent='第 '+S.day+' 天';
+}
+
+function hourChart(st,mode){
+  // mode: 'revenue' | 'mix'
+  const labels=[]; for(let i=0;i<17;i++) labels.push((i+6)+':00');
+  const W=100,H=100;
+  const c=document.createElement('canvas'); c.className='chart'; c.width=620; c.height=340;
+  const g=c.getContext('2d');
+  g.fillStyle='#241c14'; g.fillRect(0,0,620,340);
+  const padL=44,padR=14,padT=18,padB=40;
+  const pw=620-padL-padR, ph=340-padT-padB;
+  const maxV = mode==='revenue' ? Math.max(100, ...st.hourly.revenue.map(v=>v||0)) : Math.max(10, ...(st.hourly.orders||[]).map(v=>v||0));
+  // 网格
+  g.strokeStyle='rgba(255,255,255,.07)'; g.lineWidth=1; g.font='11px sans-serif'; g.fillStyle='#8f7d64';
+  for(let i=0;i<=4;i++){
+    const y=padT+ph*(i/4); g.beginPath(); g.moveTo(padL,y); g.lineTo(padL+pw,y); g.stroke();
+    g.textAlign='right'; g.fillText(Math.round(maxV*(1-i/4)),padL-7,y+4);
+  }
+  if(mode==='revenue'){
+    const vals=st.hourly.revenue;
+    const bw=pw/17;
+    vals.forEach((v,i)=>{
+      const h=(v||0)/maxV*ph; const x=padL+i*bw+bw*0.16; const w=bw*0.68;
+      const grd=g.createLinearGradient(0,padT+ph-h,0,padT+ph);
+      grd.addColorStop(0,'#ffbc1f'); grd.addColorStop(1,'#a9700a');
+      g.fillStyle=grd; g.fillRect(x,padT+ph-h,w,h);
+    });
+  }else{
+    const bw=pw/17;
+    for(let i=0;i<17;i++){
+      const d=st.hourly.dine[i]||0, dl=st.hourly.deliver[i]||0, tot=(d+dl)||1;
+      const x=padL+i*bw+bw*0.16, w=bw*0.68;
+      const hD=d/tot*ph, hL=dl/tot*ph;
+      g.fillStyle='#ffbc1f'; g.fillRect(x,padT+ph-hD,w,hD);
+      g.fillStyle='#38bdf8'; g.fillRect(x,padT+ph-hD-hL,w,hL);
+    }
+  }
+  g.fillStyle='#8f7d64'; g.textAlign='center'; g.font='11px sans-serif';
+  for(let i=0;i<17;i+=2){ const lbl=(i+6)+'时'; const w=g.measureText(lbl).width;
+    g.fillText(lbl, padL+(i+0.5)*(pw/17), 340-18); }
+  return c;
+}
+
+/* 面板结构缓存：静态骨架只建一次，之后仅更新数值节点，
+ * 避免高频 innerHTML 重建把用户的点击"吃掉"。 */
+const PANEL_SIG = {};   // panelId -> 结构签名
+function panelReady(id, sig){
+  if (PANEL_SIG[id] === sig) return true;
+  PANEL_SIG[id] = sig;
+  return false;
+}
+function setText(sel, val, root){
+  const scope = (root && typeof root.querySelector === 'function') ? root : document;
+  const n = scope.querySelector(sel);
+  if(n) n.innerHTML = val;
+}
+function renderPanels(){
+  const st=S.stats;
+  /* --- 总览 --- */
+  const el=document.getElementById('p-op');
+  const avg=st.served?st.revenue/st.served:0;
+  const total=st.dine+st.deliver;
+  const lossRate=(st.lost+total)?st.lost/(st.lost+total):0;
+  const inHouse=st.revenue*(1-0.42);
+  const queueTotal=S.counters.dine+S.counters.deliver;
+  const idleRiders=S.riders.filter(r=>r.state==='idle').length;
+  const busyRiders=S.riders.filter(r=>r.state!=='idle').length;
+
+  if(!panelReady('op','v1')){
+    el.innerHTML =
+      '<div class="kpis">'+
+        kpi('今日营业额','—','—','')+
+        kpi('订单总数','—','—','c2')+
+        kpi('客单价','—','—','c3')+
+        kpi('当前排队','—','—','c4')+
+      '</div>'+
+      '<div class="card"><h3>营业额趋势 <span class="tag">6:00 - 23:00</span></h3><div id="oc1"></div></div>'+
+      '<div class="card"><h3>堂食 / 外卖 单量结构</h3><div id="oc2"></div></div>'+
+      '<div class="card"><h3>实时经营状态</h3>'+
+        '<div class="row"><div class="n">店内顾客</div><div class="v" id="op-r1"></div></div>'+
+        '<div class="row"><div class="n">堂食排队</div><div class="v" id="op-r2"></div></div>'+
+        '<div class="row"><div class="n">外卖待取</div><div class="v" id="op-r3"></div></div>'+
+        '<div class="row"><div class="n">骑手在线</div><div class="v" id="op-r4"></div></div>'+
+        '<div class="row"><div class="n">门店口碑</div><div class="v" id="op-r5"></div></div>'+
+      '</div>'+
+      '<div class="card"><h3>快速调整</h3>'+
+        '<div class="ctl">'+
+          '<button data-act="price-down">价格 −</button>'+
+          '<button data-act="price-up">价格 +</button>'+
+          '<button data-act="price-reset">价格重置</button>'+
+          '<button data-act="ad">投放广告 ¥300</button>'+
+        '</div>'+
+        '<div class="hint" id="op-hint"></div>'+
+      '</div>'+
+      '<div class="card"><h3>门店事件流</h3><div class="events" id="op-events"></div></div>';
+  }
+  const kv=el.querySelectorAll('.kpi');
+  kv[0].querySelector('.vl').textContent=money(st.revenue);
+  kv[0].querySelector('.dl').textContent='毛利 '+money(inHouse)+' · 成本率 42%';
+  kv[1].querySelector('.vl').textContent=total+' 单';
+  kv[1].querySelector('.dl').textContent='堂食 '+st.dine+' · 外卖 '+st.deliver;
+  kv[2].querySelector('.vl').textContent='¥'+avg.toFixed(1);
+  kv[2].querySelector('.dl').textContent='流失 '+st.lost+' 单';
+  kv[3].querySelector('.vl').textContent=queueTotal+' 单';
+  kv[3].querySelector('.dl').textContent=queueTotal>18?'⚠ 排队过长':'队列健康';
+  setText('#op-r1','<b>'+S.inStore.length+'</b> 人',el);
+  setText('#op-r2','<b>'+S.counters.dine+'</b> 单 '+(S.counters.dine>8?'<span class="badge bad">拥堵</span>':'<span class="badge ok">通畅</span>'),el);
+  setText('#op-r3','<b>'+S.counters.deliver+'</b> 单 '+(S.counters.deliver>8?'<span class="badge warn">堆积</span>':'<span class="badge ok">正常</span>'),el);
+  setText('#op-r4','<b>'+idleRiders+'</b> / '+S.staff.rider+' &nbsp;<b>'+busyRiders+'</b> 单配送中',el);
+  setText('#op-r5','<b>'+(S.reputation*100).toFixed(0)+'</b> 分 '+(S.reputation>0.7?'<span class="badge ok">良好</span>':'<span class="badge warn">待提升</span>'),el);
+  setText('#op-hint','当前单价系数 <b style="color:var(--gold)">×'+S.price.toFixed(2)+'</b>（影响客流与利润）· '+
+    '广告剩余 <b style="color:var(--gold)">'+Math.ceil(S.adCampaign)+'</b> 分钟（提升 30% 客流、外卖占比 +6%）',el);
+  setText('#op-events',eventsHtml(),el);
+
+  const c1=document.getElementById('oc1');
+  if(c1){ c1.innerHTML=''; c1.appendChild(hourChart(st,'revenue')); }
+  const c2=document.getElementById('oc2');
+  if(c2){ c2.innerHTML=''; c2.appendChild(hourChart(st,'mix')); }
+
+  /* --- 订单 --- */
+  const dEl=document.getElementById('p-order');
+  const active=S.orders.slice(-14).reverse();
+  const stateTxt={'queued':'排队中','cooking':'制作中','ready':'待取餐','packing':'打包中','delivering':'配送中','eating':'堂食用餐','done':'已完成','lost':'已流失'};
+  const stateCol={'queued':'warn','cooking':'warn','ready':'warn','packing':'warn','delivering':'','eating':'','done':'ok','lost':'bad'};
+  if(!panelReady('order','v1')){
+    dEl.innerHTML=
+      '<div class="card"><h3>渠道看板 <span class="tag">实时</span></h3>'+
+        '<div class="split" style="margin-bottom:10px">'+
+          '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px">'+
+            '<div style="font-size:11px;color:var(--ink3)">堂食</div>'+
+            '<div style="font-size:23px;font-weight:700;color:var(--dine)" id="od-dn"></div>'+
+            '<div class="bar"><i id="od-dbar" style="width:0%"></i></div>'+
+            '<div class="mini" style="margin-top:6px" id="od-dnote"></div>'+
+          '</div>'+
+          '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px">'+
+            '<div style="font-size:11px;color:var(--ink3)">外卖</div>'+
+            '<div style="font-size:23px;font-weight:700;color:var(--deliver)" id="od-ln"></div>'+
+            '<div class="bar d"><i id="od-lbar" style="width:0%"></i></div>'+
+            '<div class="mini" style="margin-top:6px" id="od-lnote"></div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="hint">外卖占比由天气、骑手数量与广告投放共同决定。雨天堂食下降、外卖上升。</div>'+
+      '</div>'+
+      '<div class="card"><h3>实时订单流水 <span class="tag">最近 14 单</span></h3><div id="od-flow"></div></div>'+
+      '<div class="card"><h3>商品销量榜 <span class="tag">今日</span></h3><div id="od-items"></div></div>';
+  }
+  setText('#od-dn', st.dine, dEl);
+  setText('#od-ln', st.deliver, dEl);
+  const db1=dEl.querySelector('#od-dbar'); if(db1) db1.style.width=Math.round(st.dine/Math.max(1,total)*100)+'%';
+  const db2=dEl.querySelector('#od-lbar'); if(db2) db2.style.width=Math.round(st.deliver/Math.max(1,total)*100)+'%';
+  setText('#od-dnote','占比 '+(total?Math.round(st.dine/total*100):0)+'% · 排队 '+S.counters.dine, dEl);
+  setText('#od-lnote','占比 '+(total?Math.round(st.deliver/total*100):0)+'% · 待取 '+S.counters.deliver, dEl);
+  setText('#od-flow', active.length? '<table><thead><tr><th>单号</th><th>渠道</th><th>商品</th><th class="n">金额</th><th>状态</th></tr></thead><tbody>'+
+        active.map(o=>'<tr><td>#'+o.id+'</td><td>'+(o.isDeliver?'<span style="color:var(--deliver)">外卖</span>':'<span style="color:var(--dine)">堂食</span>')+
+          '</td><td>'+o.items.map(id=>MENU_BY_ID[id].name).join('、')+'</td><td class="n">¥'+o.price.toFixed(0)+
+          '</td><td><span class="badge '+(stateCol[o.state]||'')+'">'+(stateTxt[o.state]||o.state)+'</span></td></tr>').join('')+
+        '</tbody></table>' : '<div class="hint">暂无进行中的订单</div>', dEl);
+  setText('#od-items', itemsTable(st), dEl);
+
+  /* --- 人力 --- */
+  const sEl=document.getElementById('p-staff');
+  const wages=(S.staff.counter+S.staff.cook+S.staff.packer)*55 + S.staff.rider*45;
+  if(!panelReady('staff','v1')){
+    sEl.innerHTML=
+      '<div class="card"><h3>排班与人力成本 <span class="tag">人均日薪</span></h3>'+
+        stepper('前台点餐','counter',0,'负责点单/取餐')+
+        stepper('后厨备餐','cook',0,'决定出餐速度')+
+        stepper('外卖打包','packer',0,'无打包人力则外卖卡单')+
+        stepper('外卖骑手','rider',0,'同时最多接单数')+
+        '<div style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)" class="row">'+
+          '<div class="n">每日人力成本<small>随排班实时变化</small></div><div class="v" id="st-wages"></div></div>'+
+        '<div class="hint" style="margin-top:8px" id="st-headcount"></div>'+
+      '</div>'+
+      '<div class="card"><h3>产能测算</h3>'+
+        '<div class="row"><div class="n">理论出餐能力</div><div class="v" id="st-c1"></div></div>'+
+        '<div class="row"><div class="n">理论打包能力</div><div class="v" id="st-c2"></div></div>'+
+        '<div class="row"><div class="n">当前时段需求</div><div class="v" id="st-c3"></div></div>'+
+        '<div class="row"><div class="n">产能缺口</div><div class="v" id="st-c4"></div></div>'+
+      '</div>'+
+      '<div class="card"><h3>城市人流结构</h3>'+
+        '<div class="hint">周边：麦当劳门店（本店）· 麦乐送驿站 · 便利店 · 写字楼 · 住宅楼 · 银行<br>'+
+        '写字楼在午间带来高价值堂食与外卖订单，住宅楼贡献夜间外送。'+
+        '</div>'+
+        '<div style="margin-top:10px">'+
+          '<div class="row"><div class="n">当前客流系数</div><div class="v" id="st-f1"></div></div>'+
+          '<div class="row"><div class="n">口碑修正</div><div class="v" id="st-f2"></div></div>'+
+          '<div class="row"><div class="n">价格修正</div><div class="v" id="st-f3"></div></div>'+
+        '</div>'+
+      '</div>';
+  }
+  // 人力数值
+  ['counter','cook','packer','rider'].forEach(k=>{
+    const n=sEl.querySelector('[data-step="'+k+'"]');
+    if(n){ const b=n.parentElement.querySelector('b'); if(b) b.textContent=S.staff[k]; }
+  });
+  setText('#st-wages','<b>'+money(wages)+'</b>',sEl);
+  setText('#st-headcount','当前总人力 '+(S.staff.counter+S.staff.cook+S.staff.packer+S.staff.rider)+' 人 · '+
+    '人力成本占营业额 '+(st.revenue?Math.round(wages/Math.max(1,st.revenue)*100):0)+'%',sEl);
+  setText('#st-c1','<b>'+(S.staff.cook*2)+'</b> 单/时 <span class="mini">· 后厨 '+S.staff.cook+' 人</span>',sEl);
+  setText('#st-c2','<b>'+(S.staff.packer*3)+'</b> 单/时 <span class="mini">· 打包 '+S.staff.packer+' 人</span>',sEl);
+  setText('#st-c3','<b>'+(arrivalRate()*60*1.6).toFixed(0)+'</b> 单/时 <span class="mini">· 按客流系数折算</span>',sEl);
+  setText('#st-c4','<b>'+(arrivalRate()*60*1.6-(S.staff.cook*2)).toFixed(0)+'</b> 单/时 '+
+    (arrivalRate()*60*1.6>S.staff.cook*2?'<span class="badge bad">人手不足</span>':'<span class="badge ok">人手充足</span>'),sEl);
+  setText('#st-f1','<b>'+arrivalRate().toFixed(2)+'</b>',sEl);
+  setText('#st-f2','×'+(0.85+S.reputation*0.4).toFixed(2)+' <span class="mini">· 口碑影响复购</span>',sEl);
+  setText('#st-f3','×'+(1.15-(S.price-1)*0.5).toFixed(2)+' <span class="mini">· 价格越高客流越少</span>',sEl);
+
+  /* --- 供应链 --- */
+  const pEl=document.getElementById('p-supply');
+  const rawRows=Object.keys(RAW).map(k=>{
+    const maxRef={patty:70,bun:100,fry:55,chicken:45,drink:150,coffee:60}[k];
+    return '<tr><td>'+RAW[k][0]+'<div class="mini">单位：'+RAW[k][1]+'</div></td>'+
+      '<td class="n"><b id="stock-'+k+'"></b></td>'+
+      '<td style="width:38%"><div class="bar" id="stockbar-'+k+'"><i style="width:0%"></i></div></td>'+
+      '<td class="n"><button data-buy="'+k+'" style="background:var(--panel3);border:1px solid var(--line2);color:var(--ink);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;font-family:inherit">补货</button></td></tr>';
+  }).join('');
+  if(!panelReady('supply','v1')){
+    pEl.innerHTML=
+      '<div class="card"><h3>原料库存 <span class="tag">自动补货已开启</span></h3>'+
+        '<table><thead><tr><th>原料</th><th class="n">库存</th><th>水位</th><th></th></tr></thead><tbody>'+rawRows+'</tbody></table>'+
+        '<div class="hint" style="margin-top:10px">库存低于日均 12% 时系统自动采购，资金不足会中断补货。</div>'+
+      '</div>'+
+      '<div class="card"><h3>一次性采购</h3>'+
+        '<div class="ctl">'+
+          '<button data-buy="patty">肉饼 ×50 (¥300)</button>'+
+          '<button data-buy="bun">面包胚 ×80 (¥160)</button>'+
+          '<button data-buy="fry">薯条 ×40 (¥160)</button>'+
+          '<button data-buy="chicken">鸡腿肉 ×40 (¥280)</button>'+
+          '<button data-buy="drink">可乐浆 ×100 (¥200)</button>'+
+          '<button data-buy="coffee">咖啡豆 ×40 (¥200)</button>'+
+        '</div>'+
+        '<div class="hint" id="sp-cash"></div>'+
+      '</div>'+
+      '<div class="card"><h3>损耗与成本</h3>'+
+        '<div class="row"><div class="n">累计成本</div><div class="v" id="sp-c1"></div></div>'+
+        '<div class="row"><div class="n">成本率</div><div class="v" id="sp-c2"></div></div>'+
+        '<div class="row"><div class="n">单均毛利</div><div class="v" id="sp-c3"></div></div>'+
+        '<div class="row"><div class="n">报废损失</div><div class="v" id="sp-c4"></div></div>'+
+      '</div>';
+  }
+  Object.keys(RAW).forEach(k=>{
+    const maxRef={patty:70,bun:100,fry:55,chicken:45,drink:150,coffee:60}[k];
+    const pct=Math.round(S.stock[k]/maxRef*100);
+    const sn=pEl.querySelector('#stock-'+k); if(sn) sn.textContent=S.stock[k];
+    const bar=pEl.querySelector('#stockbar-'+k);
+    if(bar){ bar.className='bar '+(pct<15?'r':pct<40?'g':''); bar.firstElementChild.style.width=clamp(pct,0,100)+'%'; }
+  });
+  setText('#sp-cash','当前可用资金 <b style="color:var(--gold)">'+money(S.cash)+'</b>',pEl);
+  setText('#sp-c1','<b>'+money(st.cost)+'</b> <span class="mini">· 含原料+人力+租金</span>',pEl);
+  setText('#sp-c2','<b>'+(st.revenue?Math.round(st.cost/st.revenue*100):0)+'%</b> <span class="mini">行业健康区间 38%-48%</span>',pEl);
+  setText('#sp-c3','<b>¥'+((st.revenue-st.cost)/Math.max(1,st.served)).toFixed(1)+'</b> <span class="mini">单均贡献</span>',pEl);
+  setText('#sp-c4','<b>'+st.waste+'</b> 份 <span class="mini">临期与操作损耗</span>',pEl);
+
+  /* --- 报表 --- */
+  const rEl=document.getElementById('p-report');
+  const hist=S.history;
+  if(!panelReady('report','v1')){
+    rEl.innerHTML=
+      '<div class="card"><h3>历史日结 <span class="tag">已写入资料库</span></h3><div id="rp-hist"></div></div>'+
+      '<div class="card"><h3>单品贡献排行</h3><div id="rp-items"></div></div>'+
+      '<div class="card"><h3>经营健康度</h3>'+
+        '<div class="row"><div class="n">口碑分</div><div class="v" id="rp-h1"></div></div>'+
+        '<div class="row"><div class="n">流失率</div><div class="v" id="rp-h2"></div></div>'+
+        '<div class="row"><div class="n">产能利用</div><div class="v" id="rp-h3"></div></div>'+
+        '<div class="row"><div class="n">单均成本</div><div class="v" id="rp-h4"></div></div>'+
+      '</div>'+
+      '<div class="card"><h3>存档</h3>'+
+        '<div class="ctl"><button data-act="save">立即保存</button><button data-act="reset">重开新店</button></div>'+
+        '<div class="hint">经营进度会同时写入浏览器本地存储与资料库「麦当劳经营存档」表，跨设备可续。<br>'+
+        '当前状态：<b style="color:var(--gold)" id="rp-save"></b><br>'+
+        '若提示「资料库写入不可用」，说明当前是匿名分享页——'+
+        '<a href="https://www.workbuddy.cn/space/d/6fpJOhy9hjgnF16Qq3MOsZ" target="_blank" rel="noopener" style="color:var(--gold)">在资料库中打开</a>'+
+        ' 即可启用跨设备存档。</div>'+
+      '</div>';
+  }
+  setText('#rp-hist', hist.length? '<table><thead><tr><th>日期</th><th class="n">营收</th><th class="n">毛利</th><th class="n">订单</th><th class="n">外卖</th><th class="n">评分</th></tr></thead><tbody>'+
+        hist.slice(0,12).map(h=>'<tr><td>'+h.date+'</td><td class="n"><b>'+money(h.revenue)+'</b></td><td class="n" style="color:'+(h.profit>=0?'var(--green)':'var(--red)')+'">'+money(h.profit)+
+          '</td><td class="n">'+h.orders+'</td><td class="n">'+h.deliver+'</td><td class="n">'+h.score+'</td></tr>').join('')+
+        '</tbody></table>' : '<div class="hint">营业到 23:00 后自动结算并写入资料库「麦当劳每日经营报表」表。</div>', rEl);
+  setText('#rp-items', itemsTable(st), rEl);
+  setText('#rp-h1','<b>'+(S.reputation*100).toFixed(0)+'</b> / 100 '+(S.reputation>0.7?'<span class="badge ok">稳健</span>':'<span class="badge warn">波动</span>'), rEl);
+  setText('#rp-h2','<b>'+(st.lost+total?Math.round(st.lost/(st.lost+total)*100):0)+'%</b> '+(st.lost/(st.lost+total||1)>0.12?'<span class="badge bad">偏高</span>':'<span class="badge ok">可控</span>'), rEl);
+  setText('#rp-h3','<b>'+Math.min(100,Math.round(arrivalRate()*60*1.6/Math.max(1,S.staff.cook*2)*100))+'%</b> <span class="mini">需求 / 后厨能力</span>', rEl);
+  setText('#rp-h4','<b>¥'+((st.cost)/Math.max(1,st.served)).toFixed(1)+'</b> <span class="mini">含原料与人力</span>', rEl);
+  setText('#rp-save', S._lastSave||'尚未保存', rEl);
+}
+
+function kpi(lb,vl,dl,cls){ return '<div class="kpi '+(cls||'')+'"><div class="lb">'+lb+'</div><div class="vl">'+vl+'</div><div class="dl">'+dl+'</div></div>'; }
+function row(n,v,extra){ return '<div class="row"><div class="n">'+n+'</div><div class="v">'+v+(extra?' '+extra:'')+'</div></div>'; }
+function stepper(label,key,val,desc){
+  return '<div class="row"><div class="n">'+label+'<small>'+desc+'</small></div>'+
+    '<div class="stepper"><button data-step="'+key+'" data-d="-1">−</button><b>'+val+'</b>'+
+    '<button data-step="'+key+'" data-d="1">＋</button></div></div>';
+}
+function eventsHtml(){
+  if(!S.events.length) return '<div class="hint">暂无事件</div>';
+  return S.events.map(e=>'<div class="ev '+e.cls+'"><span class="tm">'+e.t+'</span><span class="tx">'+e.text+'</span></div>').join('');
+}
+function itemsTable(st){
+  const arr=Object.keys(st.items).map(id=>({id:id,n:st.items[id],p:MENU_BY_ID[id].price})).sort((a,b)=>b.n-a.n);
+  const tot=arr.reduce((a,x)=>a+x.n,0)||1;
+  if(!arr.length) return '<div class="hint">今日尚无商品售出</div>';
+  return '<table><thead><tr><th>商品</th><th class="n">销量</th><th>占比</th><th class="n">销售额</th></tr></thead><tbody>'+
+    arr.map(x=>'<tr><td><b>'+MENU_BY_ID[x.id].name+'</b> <span class="mini">¥'+MENU_BY_ID[x.id].price+' · '+MENU_BY_ID[x.id].cat+'</span></td>'+
+      '<td class="n">'+x.n+'</td><td style="width:34%"><div class="bar"><i style="width:'+Math.round(x.n/tot*100)+'%"></i></div></td>'+
+      '<td class="n">¥'+Math.round(x.n*x.p)+'</td></tr>').join('')+'</tbody></table>';
+}
+
+/* 事件委托 */
+document.addEventListener('click',async e=>{
+  const t=e.target.closest('[data-act],[data-buy],[data-step]'); if(!t) return;
+  if(t.dataset.step){
+    const k=t.dataset.step, d=parseInt(t.dataset.d);
+    const max={counter:6,cook:8,packer:5,rider:6}[k];
+    const cost={counter:55,cook:55,packer:55,rider:45}[k];
+    const nv=clamp(S.staff[k]+d,0,max);
+    if(nv===S.staff[k]) return;
+    if(nv>S.staff[k] && S.cash<cost*2){ toast('资金不足，无法增加人手'); return; }
+    S.staff[k]=nv;
+    if(nv<S.staff[k]) S.cash-=cost*2;
+    saveGame(); renderPanels(); return;
+  }
+  if(t.dataset.buy){
+    const k=t.dataset.buy;
+    const pack={patty:['patty',50,300],bun:['bun',80,160],fry:['fry',40,160],chicken:['chicken',40,280],drink:['drink',100,200],coffee:['coffee',40,200]}[k];
+    if(S.cash<pack[2]){ toast('资金不足，无法采购'); return; }
+    S.cash-=pack[2]; S.stock[pack[0]]+=pack[1]; S.stats.cost+=pack[2];
+    logEvent('采购 '+RAW[k][0]+' ×'+pack[1],'g'); toast('已采购 '+RAW[k][0]+' ×'+pack[1]);
+    saveGame(); renderPanels(); return;
+  }
+  const a=t.dataset.act;
+  if(a==='price-up'){ S.price=clamp(S.price+0.05,0.8,1.4); toast('单价系数 ×'+S.price.toFixed(2)); }
+  else if(a==='price-down'){ S.price=clamp(S.price-0.05,0.8,1.4); toast('单价系数 ×'+S.price.toFixed(2)); }
+  else if(a==='price-reset'){ S.price=1; toast('单价已重置为 ×1.00'); }
+  else if(a==='ad'){ if(S.cash<300){toast('资金不足');return;} S.cash-=300; S.adCampaign=120; S.stats.cost+=300; logEvent('投放门店广告 120 分钟','y'); toast('广告已投放，客流 +30%'); }
+  else if(a==='save'){ await saveGame(); toast(S._lastSave==='资料库'?'已保存到资料库与本地':'已保存到本地（资料库写入不可用）'); }
+  else if(a==='reset'){ if(!confirm('确定重开新店？当前进度将被清空。')) return; S=freshState(); S.history=[]; saveGame(); renderPanels(); toast('已重开新店'); }
+  saveGame();
+});
+
+/* 键盘可达性 */
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT') return;
+  if(e.key===' '){ e.preventDefault(); running=!running;
+    document.querySelectorAll('#speedBtns button').forEach(x=>x.classList.toggle('on', x.dataset.s===(running?speed:0)));
+  }
+  if(e.key>='1'&&e.key<='3'){ const map={'1':1,'2':3,'3':8}; speed=map[e.key]; running=true;
+    document.querySelectorAll('#speedBtns button').forEach(x=>x.classList.toggle('on', parseInt(x.dataset.s)===speed)); }
+});
+
+/* 启动 */
+(async function init(){
+  try{
+    initStage();
+    Stage.vehicles = [];
+    Stage.riderVehicles = [];
+    Stage.actorPool = { dine:[], deliver:[], rider:[], staff:[] };
+  }catch(err){
+    console.error('3D 初始化失败', err);
+    toast('3D 场景初始化失败，请检查浏览器 WebGL 支持');
+  }
+  await loadGame();
+  logEvent('门店开业，准备迎接第一批顾客','y');
+  updateHud(); renderPanels();
+  setInterval(()=>{ if(running) saveGame(); }, 12000);
+  requestAnimationFrame(anim);
+})();
+
+/* ---------------- 动画主循环 ---------------- */
+let lastFrame = 0;
+function anim(t){
+  const dt = Math.min(0.1, (t - lastFrame)/1000 || 0.016);
+  lastFrame = t;
+
+  if(running && speed>0){
+    acc += dt*speed;
+    const step = 0.25;
+    let guard = 0;
+    while(acc >= step && guard++ < 40){ acc -= step; simTick(); }
+  }
+
+  updateStage(dt);
+  applyDayLight();
+  updateHud();
+
+  panelAcc += dt;
+  if(panelAcc >= 0.5){ panelAcc = 0; renderPanels(); }
+  requestAnimationFrame(anim);
+}
+
+window.addEventListener('resize', resizeStage);
+
+})();
+</script>
+</body>
+</html>
